@@ -1,0 +1,220 @@
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark light;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==============================================================================
+   PREMIUM AG GRID ENTERPRISE STYLING (MATCHING REFERENCE DESIGN)
+   ============================================================================== */
+
+.ag-theme-quartz,
+.ag-theme-quartz-dark {
+  --ag-font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --ag-font-size: 13.5px;
+  --ag-grid-size: 6px;
+  --ag-list-item-height: 28px;
+  --ag-border-radius: 8px;
+  --ag-cell-horizontal-padding: 16px;
+  --ag-header-height: 48px;
+  --ag-row-height: 46px;
+  
+  /* Header column separators (vertical dividers | in header) */
+  --ag-header-column-separator-display: block;
+  --ag-header-column-separator-height: 45%;
+  --ag-header-column-separator-width: 1px;
+  --ag-header-column-separator-color: #E2E8F0;
+
+  /* Header resize handles */
+  --ag-header-column-resize-handle-display: block;
+  --ag-header-column-resize-handle-height: 50%;
+  --ag-header-column-resize-handle-width: 2px;
+  --ag-header-column-resize-handle-color: #CBD5E1;
+
+  font-family: var(--ag-font-family);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Light Quartz Theme Customization */
+.ag-theme-quartz {
+  --ag-background-color: #FFFFFF;
+  --ag-header-background-color: #FFFFFF;
+  --ag-header-foreground-color: #1E293B;
+  --ag-header-cell-hover-background-color: #F8FAFC;
+  --ag-border-color: #E2E8F0;
+  --ag-secondary-border-color: #F1F5F9;
+  --ag-row-border-color: #F1F5F9;
+  --ag-data-color: #1E293B;
+  
+  /* Row Hover & Selection (Soft pastel blue matching reference) */
+  --ag-row-hover-color: #F8FAFC;
+  --ag-selected-row-background-color: #EBF5FF;
+  --ag-range-selection-border-color: #3B82F6;
+  --ag-range-selection-background-color: rgba(59, 130, 246, 0.08);
+  
+  /* Checkbox styling */
+  --ag-checkbox-checked-color: #0284C7;
+  --ag-checkbox-unchecked-color: #94A3B8;
+  --ag-checkbox-border-radius: 4px;
+  --ag-checkbox-background-color: #FFFFFF;
+  
+  border: 1px solid #E2E8F0;
+}
+
+/* Dark Quartz Theme Customization */
+.ag-theme-quartz-dark {
+  --ag-background-color: #0F172A;
+  --ag-header-background-color: #1E293B;
+  --ag-header-foreground-color: #F1F5F9;
+  --ag-header-cell-hover-background-color: #334155;
+  --ag-border-color: #334155;
+  --ag-secondary-border-color: rgba(255, 255, 255, 0.06);
+  --ag-row-border-color: rgba(255, 255, 255, 0.06);
+  --ag-data-color: #F1F5F9;
+  
+  --ag-row-hover-color: rgba(255, 255, 255, 0.03);
+  --ag-selected-row-background-color: rgba(2, 132, 199, 0.16);
+  --ag-range-selection-border-color: #38BDF8;
+  --ag-range-selection-background-color: rgba(56, 189, 248, 0.12);
+  
+  --ag-checkbox-checked-color: #38BDF8;
+  --ag-checkbox-border-radius: 4px;
+  
+  border: 1px solid #334155;
+}
+
+/* Column Header Styling */
+.ag-theme-quartz .ag-header,
+.ag-theme-quartz-dark .ag-header {
+  border-bottom: 1px solid var(--ag-border-color) !important;
+  font-weight: 600;
+}
+
+.ag-theme-quartz .ag-header-cell,
+.ag-theme-quartz-dark .ag-header-cell {
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  border-right: 1px solid var(--ag-secondary-border-color) !important;
+}
+
+.ag-theme-quartz .ag-header-cell-text,
+.ag-theme-quartz-dark .ag-header-cell-text {
+  font-weight: 600;
+  color: inherit;
+}
+
+/* Right-aligned headers and cells for numbers and currency */
+.ag-theme-quartz .ag-right-aligned-header .ag-header-cell-comp-wrapper,
+.ag-theme-quartz-dark .ag-right-aligned-header .ag-header-cell-comp-wrapper,
+.ag-theme-quartz .ag-right-aligned-header .ag-header-cell-label,
+.ag-theme-quartz-dark .ag-right-aligned-header .ag-header-cell-label {
+  justify-content: flex-end !important;
+  text-align: right !important;
+}
+
+.ag-right-aligned-cell {
+  justify-content: flex-end !important;
+  text-align: right !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+/* Cell Vertical Centering & Strict Overflow/Clipping Protection */
+.ag-theme-quartz .ag-cell,
+.ag-theme-quartz-dark .ag-cell,
+.ag-cell {
+  display: flex !important;
+  align-items: center !important;
+  line-height: normal !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  contain: paint layout !important;
+  border-right: 1px solid var(--ag-secondary-border-color) !important;
+}
+
+.ag-theme-quartz .ag-react-container,
+.ag-theme-quartz-dark .ag-react-container,
+.ag-react-container {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+.ag-theme-quartz .ag-cell-value,
+.ag-theme-quartz-dark .ag-cell-value,
+.ag-theme-quartz .ag-cell-wrapper,
+.ag-theme-quartz-dark .ag-cell-wrapper {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  display: block !important;
+}
+
+.ag-cell * {
+  min-width: 0 !important;
+}
+
+.ag-cell-ellipsis {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  display: block !important;
+}
+
+/* Floating Filter Inputs */
+.ag-theme-quartz .ag-floating-filter-input,
+.ag-theme-quartz-dark .ag-floating-filter-input {
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* Smooth transitions */
+.ag-theme-quartz .ag-row,
+.ag-theme-quartz-dark .ag-row {
+  transition: background-color 0.12s ease;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}

@@ -1,0 +1,14 @@
+.git
+.github
+.vscode
+.idea
+*.log
+backend/.venv
+backend/__pycache__
+backend/*.db
+backend/*.sqlite3
+backend/.pytest_cache
+frontend/node_modules
+frontend/dist
+backups/
+datamatrix.tar.gz
