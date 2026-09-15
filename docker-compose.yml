@@ -12,8 +12,10 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
-    ports:
-      - "5432:5432"
+    # PostgreSQL is accessed internally by backend via app_network:5432
+    # Uncomment only if direct external database GUI access (e.g., DBeaver) is needed
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-datamatrix}" ]
       interval: 5s
@@ -65,7 +67,7 @@ services:
     container_name: datamatrix_proxy
     restart: always
     ports:
-      - "80:80"
+      - "${HTTP_PORT:-80}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

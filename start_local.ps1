@@ -7,7 +7,7 @@ Write-Host "====================================================" -ForegroundCol
 Write-Host " Starting DataMatrix Enterprise Platform Locally... " -ForegroundColor Green
 Write-Host "====================================================" -ForegroundColor Cyan
 
-$RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RootDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 
 # 1. Start Backend FastAPI server in a new window
 Write-Host "[1/2] Starting FastAPI Backend on http://127.0.0.1:8000 ..." -ForegroundColor Yellow
