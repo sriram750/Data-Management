@@ -91,7 +91,7 @@ export const DashboardPage: React.FC = () => {
       bgGradient: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%)',
     },
     {
-      title: 'Imports Today',
+      title: 'Imports Today List',
       value: metrics?.imports_today ?? 0,
       icon: <FileUploadOutlined fontSize="medium" />,
       color: '#8b5cf6',
