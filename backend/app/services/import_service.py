@@ -119,12 +119,42 @@ def infer_column_type_from_samples(values: List[Any]) -> ColumnType:
 
 class ImportService:
     @staticmethod
+    def _normalize_workbook_merged_cells(file_bytes: bytes, target_path: str) -> None:
+        """
+        Unmerges any merged cells across all worksheets in the workbook,
+        forward-filling the top-left cell's value into all cells of each merged range.
+        If no merged cells exist or if an error occurs, the original bytes are written directly.
+        """
+        try:
+            in_mem = io.BytesIO(file_bytes)
+            wb = openpyxl.load_workbook(in_mem, data_only=True)
+            has_merged = any(bool(ws.merged_cells.ranges) for ws in wb.worksheets)
+            if has_merged:
+                for ws in wb.worksheets:
+                    merged_ranges = list(ws.merged_cells.ranges)
+                    for rng in merged_ranges:
+                        min_col, min_row, max_col, max_row = rng.min_col, rng.min_row, rng.max_col, rng.max_row
+                        top_left_val = ws.cell(row=min_row, column=min_col).value
+                        ws.unmerge_cells(start_row=min_row, start_column=min_col, end_row=max_row, end_column=max_col)
+                        for r in range(min_row, max_row + 1):
+                            for c in range(min_col, max_col + 1):
+                                ws.cell(row=r, column=c).value = top_left_val
+                wb.save(target_path)
+                wb.close()
+                return
+            wb.close()
+        except Exception:
+            pass
+
+        with open(target_path, "wb") as f:
+            f.write(file_bytes)
+
+    @staticmethod
     def save_temp_file(file_bytes: bytes, original_filename: str) -> str:
         """Saves uploaded excel bytes to temp storage and returns file token."""
         file_token = str(uuid.uuid4())
         file_path = os.path.join(TEMP_UPLOAD_DIR, f"import_{file_token}.xlsx")
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
+        ImportService._normalize_workbook_merged_cells(file_bytes, file_path)
         return file_token
 
     @staticmethod

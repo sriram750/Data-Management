@@ -219,3 +219,77 @@ async def test_excel_multi_sheet_batch_import(client: AsyncClient, super_admin_a
     assert emp_table["imported_rows"] == 2
     assert exit_table["imported_rows"] == 1
 
+
+@pytest.mark.asyncio
+async def test_excel_import_merged_cells(client: AsyncClient, super_admin_auth):
+    _, headers = super_admin_auth
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "MergedData"
+    ws.append(["Category", "Code", "Name"])
+    ws.append(["Bill", "EC5938", "Bill Charles Antony"])
+    ws.append([None, "EC7954", "Clinton Mark Gomez"])
+    ws.append([None, "EC9741", "Lalrindika R"])
+    ws.append([None, "EC11083", "Kavitha A"])
+    ws.append([None, "EC10778", "Perees Lason A"])
+    ws.merge_cells("A2:A6")
+
+    out = io.BytesIO()
+    wb.save(out)
+    excel_bytes = out.getvalue()
+
+    # 1. Upload for Preview
+    files = {"file": ("merged_cells_test.xlsx", excel_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    preview_res = await client.post("/api/v1/imports/upload", files=files, headers=headers)
+    assert preview_res.status_code == 200
+    preview = preview_res.json()
+    assert preview["total_rows"] == 5
+    # Check that preview rows all have Category == "Bill"
+    for r in preview["preview_rows"]:
+        assert r["Category"] == "Bill"
+
+    file_token = preview["file_token"]
+    sheet_name = preview["selected_sheet"]
+
+    cols_config = [
+        {"source_column": "Category", "target_column": "category", "data_type": "TEXT", "is_required": True},
+        {"source_column": "Code", "target_column": "code", "data_type": "TEXT", "is_required": True},
+        {"source_column": "Name", "target_column": "name", "data_type": "TEXT"},
+    ]
+
+    # 2. Validate
+    val_res = await client.post(
+        "/api/v1/imports/validate",
+        data={"file_token": file_token, "sheet_name": sheet_name, "columns_json": json.dumps(cols_config)},
+        headers=headers,
+    )
+    assert val_res.status_code == 200
+    val_data = val_res.json()
+    assert val_data["error_rows"] == 0
+    assert val_data["valid_rows"] == 5
+    assert val_data["is_valid"] is True
+
+    # 3. Execute Import
+    exec_payload = {
+        "file_token": file_token,
+        "sheet_name": sheet_name,
+        "mode": "INSERT_NEW_TABLE",
+        "new_table_name": "merged_cells_test_table",
+        "new_table_display_name": "Merged Cells Test Table",
+        "columns": cols_config,
+    }
+    exec_res = await client.post("/api/v1/imports/execute", json=exec_payload, headers=headers)
+    assert exec_res.status_code == 200
+    table_id = exec_res.json()["table_id"]
+
+    # 4. Verify all 5 records have category == "Bill"
+    records_res = await client.get(f"/api/v1/tables/{table_id}/records", headers=headers)
+    assert records_res.status_code == 200
+    items = records_res.json()["items"]
+    assert len(items) == 5
+    for item in items:
+        assert item["data"]["category"] == "Bill"
+    codes = [item["data"]["code"] for item in items]
+    assert codes == ["EC5938", "EC7954", "EC9741", "EC11083", "EC10778"]
+
+

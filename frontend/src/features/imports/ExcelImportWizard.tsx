@@ -88,6 +88,7 @@ export const ExcelImportWizard: React.FC = () => {
 
   const [activeStep, setActiveStep] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview] = useState<ExcelPreviewResponse | null>(null);
   const [selectedSheet, setSelectedSheet] = useState<string>('');
   const [selectedSheets, setSelectedSheets] = useState<string[]>([]);
@@ -399,7 +400,7 @@ export const ExcelImportWizard: React.FC = () => {
       </Box>
 
       {/* Stepper */}
-      <Paper sx={{ p: 2.5, mb: 3.5, borderRadius: 3 }}>
+      <Paper sx={{ p: 1.5, mb: 2, borderRadius: 2 }}>
         <Stepper activeStep={activeStep}>
           {STEPS.map((label) => (
             <Step key={label}>
@@ -410,36 +411,64 @@ export const ExcelImportWizard: React.FC = () => {
       </Paper>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}
 
       {/* Step 1: Upload File */}
       {activeStep === 0 && (
-        <Card sx={{ borderRadius: 3 }}>
-          <CardContent sx={{ p: 5, textAlign: 'center' }}>
+        <Card sx={{ borderRadius: 2 }}>
+          <CardContent sx={{ p: { xs: 2.5, sm: 3.5 }, textAlign: 'center' }}>
             <Box
-              sx={{
-                border: '2px dashed rgba(99, 102, 241, 0.4)',
-                borderRadius: 3,
-                p: 6,
-                bgcolor: 'background.default',
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' },
-              }}
               component="label"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+                if (e.dataTransfer.files?.[0]) {
+                  handleUploadFile(e.dataTransfer.files[0]);
+                }
+              }}
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '100%',
+                boxSizing: 'border-box',
+                border: '2px dashed',
+                borderColor: isDragging ? 'primary.main' : 'rgba(99, 102, 241, 0.4)',
+                borderRadius: 2,
+                p: { xs: 3, sm: 4.5 },
+                bgcolor: isDragging ? 'action.hover' : 'background.default',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  borderColor: 'primary.main',
+                  bgcolor: 'action.hover',
+                },
+              }}
             >
-              <CloudUpload sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
-              <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
+              <CloudUpload sx={{ fontSize: 48, color: 'primary.main', mb: 1.5 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>
                 Choose or Drop an Excel File (.xlsx)
               </Typography>
-              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2, maxWidth: 550 }}>
                 Supports standard Excel workbooks. The system will auto-detect worksheets and column data types.
               </Typography>
-              <Button variant="contained" size="large" component="span" disabled={loading} startIcon={<FileUpload />}>
-                {loading ? <CircularProgress size={24} color="inherit" /> : 'Select Spreadsheet'}
+              <Button variant="contained" size="medium" component="span" disabled={loading} startIcon={<FileUpload />}>
+                {loading ? <CircularProgress size={20} color="inherit" /> : 'Select Spreadsheet'}
               </Button>
               <input
                 type="file"

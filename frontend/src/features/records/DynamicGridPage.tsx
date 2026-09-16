@@ -104,9 +104,9 @@ import ExportModal from '../exports/ExportModal';
 type DensityMode = 'compact' | 'standard' | 'comfortable';
 
 const DENSITY_SETTINGS: Record<DensityMode, { row: number; header: number; label: string }> = {
-  compact: { row: 36, header: 38, label: 'Compact' },
-  standard: { row: 46, header: 44, label: 'Standard' },
-  comfortable: { row: 56, header: 50, label: 'Comfortable' },
+  compact: { row: 28, header: 32, label: 'Compact' },
+  standard: { row: 34, header: 36, label: 'Standard' },
+  comfortable: { row: 42, header: 42, label: 'Comfortable' },
 };
 
 const ALL_COLUMN_TYPES: { type: ColumnType; label: string; desc: string }[] = [
@@ -623,7 +623,7 @@ export const DynamicGridPage: React.FC = () => {
         filter: true,
         resizable: true,
         editable: !col.is_sensitive && col.data_type !== 'PASSWORD' && col.data_type !== 'FILE',
-        minWidth: 140,
+        minWidth: 95,
         hide: isHidden,
         headerClass: isNumeric ? 'ag-right-aligned-header' : undefined,
         tooltipValueGetter: (params) => {
@@ -1269,7 +1269,7 @@ export const DynamicGridPage: React.FC = () => {
                 setDensityMenuAnchor(null);
               }}
             >
-              <DensitySmall sx={{ mr: 1, fontSize: 18 }} /> Compact (36px)
+              <DensitySmall sx={{ mr: 1, fontSize: 16 }} /> Compact (28px)
             </MenuItem>
             <MenuItem
               selected={density === 'standard'}
@@ -1278,7 +1278,7 @@ export const DynamicGridPage: React.FC = () => {
                 setDensityMenuAnchor(null);
               }}
             >
-              <DensityMedium sx={{ mr: 1, fontSize: 18 }} /> Standard (46px)
+              <DensityMedium sx={{ mr: 1, fontSize: 16 }} /> Standard (34px)
             </MenuItem>
             <MenuItem
               selected={density === 'comfortable'}
@@ -1287,7 +1287,7 @@ export const DynamicGridPage: React.FC = () => {
                 setDensityMenuAnchor(null);
               }}
             >
-              <DensityLarge sx={{ mr: 1, fontSize: 18 }} /> Comfortable (56px)
+              <DensityLarge sx={{ mr: 1, fontSize: 16 }} /> Comfortable (42px)
             </MenuItem>
           </Menu>
 

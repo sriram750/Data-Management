@@ -26,13 +26,13 @@ body {
 .ag-theme-quartz,
 .ag-theme-quartz-dark {
   --ag-font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --ag-font-size: 13.5px;
-  --ag-grid-size: 6px;
-  --ag-list-item-height: 28px;
-  --ag-border-radius: 8px;
-  --ag-cell-horizontal-padding: 16px;
-  --ag-header-height: 48px;
-  --ag-row-height: 46px;
+  --ag-font-size: 12.5px;
+  --ag-grid-size: 4px;
+  --ag-list-item-height: 24px;
+  --ag-border-radius: 6px;
+  --ag-cell-horizontal-padding: 10px;
+  --ag-header-height: 36px;
+  --ag-row-height: 34px;
   
   /* Header column separators (vertical dividers | in header) */
   --ag-header-column-separator-display: block;

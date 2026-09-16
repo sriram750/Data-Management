@@ -51,7 +51,7 @@ import { useThemeMode } from '../../context/ThemeContext';
 import ChangePasswordModal from '../../features/auth/ChangePasswordModal';
 import ActiveSessionsModal from '../../features/auth/ActiveSessionsModal';
 
-const DRAWER_WIDTH = 260;
+const DRAWER_WIDTH = 240;
 
 export const AppLayout: React.FC = () => {
   const { user, logout } = useAuth();
@@ -482,10 +482,10 @@ export const AppLayout: React.FC = () => {
         component="main"
         sx={{
           flexGrow: 1,
-          p: { xs: 2, sm: 3, md: 4 },
+          p: { xs: 1.5, sm: 2, md: 2.5 },
           width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
-          mt: 8,
-          minHeight: 'calc(100vh - 64px)',
+          mt: 6.5,
+          minHeight: 'calc(100vh - 52px)',
         }}
       >
         <Outlet />
