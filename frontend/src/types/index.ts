@@ -104,6 +104,9 @@ export interface DataTable {
   description?: string | null;
   is_active: boolean;
   is_favorite: boolean;
+  is_private: boolean;
+  is_locked: boolean;
+  has_password: boolean;
   columns: DataColumn[];
   record_count: number;
   created_at: string;

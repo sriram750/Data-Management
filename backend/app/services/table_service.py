@@ -6,6 +6,7 @@ from sqlalchemy import func, select, desc
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
+from app.core.security import hash_password, verify_password
 from app.models.audit_log import AuditAction
 from app.models.dynamic_column import DataColumn
 from app.models.dynamic_record import DataRecord
@@ -38,12 +39,18 @@ class TableService:
         if existing.scalar_one_or_none():
             raise ConflictException(f"A table with the identifier '{clean_name}' already exists.")
 
+        pw_hash = hash_password(req.password.strip()) if req.password and req.password.strip() else None
+        is_locked_val = bool(req.is_locked or pw_hash)
+
         table = DataTable(
             name=clean_name,
             display_name=req.display_name.strip(),
             description=req.description.strip() if req.description else None,
             is_active=True,
             is_favorite=False,
+            is_private=bool(req.is_private),
+            is_locked=is_locked_val,
+            password_hash=pw_hash,
             created_by_id=user.id,
             updated_by_id=user.id,
         )
@@ -193,6 +200,25 @@ class TableService:
             table.is_active = req.is_active
         if req.is_favorite is not None:
             table.is_favorite = req.is_favorite
+        if req.is_private is not None:
+            table.is_private = req.is_private
+
+        # Confirm existing password if table already has a password and user is disabling or modifying it
+        if table.password_hash:
+            is_disabling_or_modifying = (req.is_locked is False) or (req.password is not None)
+            if is_disabling_or_modifying:
+                if not req.current_password or not verify_password(req.current_password.strip(), table.password_hash):
+                    raise ValidationException("Current table password is required and must be correct to disable or modify password protection.")
+
+        if req.is_locked is not None:
+            table.is_locked = req.is_locked
+        if req.password is not None:
+            if req.password.strip() == "":
+                table.password_hash = None
+                table.is_locked = False
+            else:
+                table.password_hash = hash_password(req.password.strip())
+                table.is_locked = True
 
         table.updated_by_id = user.id
 
@@ -219,11 +245,79 @@ class TableService:
             table_name=table.name,
             ip_address=ip_address,
             user_agent=user_agent,
-            details={"changes": req.model_dump(exclude_unset=True)},
+            details={"changes": req.model_dump(exclude_unset=True, exclude={"password", "current_password"})},
         )
         await db.commit()
         await db.refresh(table)
         return table
+
+    @staticmethod
+    async def set_table_lock(
+        db: AsyncSession,
+        table_id: UUID,
+        is_locked: Optional[bool],
+        is_private: Optional[bool],
+        password: Optional[str],
+        user: User,
+        current_password: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> DataTable:
+        table = await TableService.get_table_by_id(db, table_id)
+
+        # Confirm existing password if table already has a password and user is disabling or modifying it
+        if table.password_hash:
+            is_disabling_or_modifying = (is_locked is False) or (password is not None)
+            if is_disabling_or_modifying:
+                if not current_password or not verify_password(current_password.strip(), table.password_hash):
+                    raise ValidationException("Current table password is required and must be correct to disable or modify password protection.")
+
+        if is_private is not None:
+            table.is_private = is_private
+        if is_locked is not None:
+            table.is_locked = is_locked
+        if password is not None:
+            if password.strip() == "":
+                table.password_hash = None
+                table.is_locked = False
+            else:
+                table.password_hash = hash_password(password.strip())
+                table.is_locked = True
+
+        table.updated_by_id = user.id
+        await audit_service.log_event(
+            db=db,
+            action=AuditAction.TABLE_UPDATED,
+            username=user.username,
+            user_id=user.id,
+            table_id=table.id,
+            table_name=table.name,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            details={
+                "action": "TABLE_SECURITY_LOCK_UPDATED",
+                "is_private": table.is_private,
+                "is_locked": table.is_locked,
+                "has_password": bool(table.password_hash),
+            },
+        )
+        await db.commit()
+        await db.refresh(table)
+        return table
+
+    @staticmethod
+    async def unlock_table(
+        db: AsyncSession,
+        table_id: UUID,
+        password: str,
+        user: User,
+    ) -> bool:
+        table = await TableService.get_table_by_id(db, table_id)
+        if not table.password_hash:
+            return True
+        if not password:
+            return False
+        return verify_password(password.strip(), table.password_hash)
 
     @staticmethod
     async def delete_table(

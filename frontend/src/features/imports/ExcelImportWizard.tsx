@@ -38,8 +38,11 @@ import {
   DeleteOutlined,
   FileUpload,
   FlashOn,
+  KeyOutlined,
   LayersOutlined,
+  LockOutlined,
   PlaylistAddCheck,
+  SecurityOutlined,
   TableChartOutlined,
   TableView,
   VisibilityOutlined,
@@ -107,6 +110,9 @@ export const ExcelImportWizard: React.FC = () => {
   const [newTableName, setNewTableName] = useState('');
   const [newTableDisplayName, setNewTableDisplayName] = useState('');
   const [newTableDescription, setNewTableDescription] = useState('');
+  const [importIsPrivate, setImportIsPrivate] = useState(false);
+  const [importIsLocked, setImportIsLocked] = useState(false);
+  const [importPassword, setImportPassword] = useState('');
 
   const [existingTables, setExistingTables] = useState<DataTable[]>([]);
   const [selectedExistingTableId, setSelectedExistingTableId] = useState<string>(preselectedTableId || '');
@@ -371,6 +377,9 @@ export const ExcelImportWizard: React.FC = () => {
         new_table_name: importMode === 'INSERT_NEW_TABLE' ? newTableName : undefined,
         new_table_display_name: importMode === 'INSERT_NEW_TABLE' ? newTableDisplayName : undefined,
         new_table_description: importMode === 'INSERT_NEW_TABLE' ? newTableDescription : undefined,
+        is_private: importMode === 'INSERT_NEW_TABLE' ? importIsPrivate : false,
+        is_locked: importMode === 'INSERT_NEW_TABLE' ? (importIsLocked || Boolean(importPassword.trim())) : false,
+        password: importMode === 'INSERT_NEW_TABLE' && importPassword.trim() ? importPassword.trim() : undefined,
         existing_table_id: importMode !== 'INSERT_NEW_TABLE' ? selectedExistingTableId : undefined,
         matching_key_column:
           importMode === 'UPDATE_EXISTING' || importMode === 'UPSERT_EXISTING' ? matchingKeyColumn : undefined,
@@ -916,6 +925,72 @@ export const ExcelImportWizard: React.FC = () => {
                         onChange={(e) => setNewTableName(e.target.value)}
                         required
                       />
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 1.5,
+                          borderRadius: 2,
+                          bgcolor: importIsPrivate ? 'rgba(124, 77, 255, 0.05)' : 'background.paper',
+                          borderColor: importIsPrivate ? 'secondary.main' : 'divider',
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <LockOutlined color={importIsPrivate ? 'secondary' : 'action'} fontSize="small" />
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {importIsPrivate ? 'Private Table (Strictly Restricted)' : 'Public Table (Standard RBAC)'}
+                            </Typography>
+                          </Box>
+                          <Switch
+                            size="small"
+                            checked={importIsPrivate}
+                            onChange={(e) => setImportIsPrivate(e.target.checked)}
+                            color="secondary"
+                          />
+                        </Box>
+                      </Paper>
+                    </Grid>
+                    <Grid size={{ xs: 12, sm: 6 }}>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 1.5,
+                          borderRadius: 2,
+                          bgcolor: importIsLocked ? 'rgba(255, 152, 0, 0.05)' : 'background.paper',
+                          borderColor: importIsLocked ? 'warning.main' : 'divider',
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <KeyOutlined color={importIsLocked ? 'warning' : 'action'} fontSize="small" />
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {importIsLocked ? 'Password Lock Enabled' : 'Password Lock Off'}
+                            </Typography>
+                          </Box>
+                          <Switch
+                            size="small"
+                            checked={importIsLocked}
+                            onChange={(e) => {
+                              setImportIsLocked(e.target.checked);
+                              if (!e.target.checked) setImportPassword('');
+                            }}
+                            color="warning"
+                          />
+                        </Box>
+                        {importIsLocked && (
+                          <TextField
+                            fullWidth
+                            size="small"
+                            type="password"
+                            placeholder="Enter access password..."
+                            value={importPassword}
+                            onChange={(e) => setImportPassword(e.target.value)}
+                            sx={{ mt: 1 }}
+                          />
+                        )}
+                      </Paper>
                     </Grid>
                   </>
                 ) : (

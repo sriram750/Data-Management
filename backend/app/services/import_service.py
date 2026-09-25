@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.encryption import encryption_service
 from app.core.exceptions import ConflictException, NotFoundException, ValidationException
+from app.core.security import hash_password
 from app.models.audit_log import AuditAction
 from app.models.dynamic_column import ColumnType, DataColumn
 from app.models.dynamic_record import DataRecord
@@ -361,11 +362,15 @@ class ImportService:
             if existing.scalar_one_or_none():
                 raise ConflictException(f"Table '{table_slug}' already exists.")
 
+            pw_hash = hash_password(req.password.strip()) if req.password and req.password.strip() else None
             table = DataTable(
                 name=table_slug,
                 display_name=req.new_table_display_name.strip(),
                 description=req.new_table_description.strip() if req.new_table_description else None,
                 is_active=True,
+                is_private=bool(req.is_private),
+                is_locked=bool(req.is_locked or pw_hash),
+                password_hash=pw_hash,
                 created_by_id=user.id,
                 updated_by_id=user.id,
             )

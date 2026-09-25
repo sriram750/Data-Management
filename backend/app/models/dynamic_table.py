@@ -13,6 +13,9 @@ class DataTable(Base, UUIDMixin, TimestampMixin):
     description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_favorite = Column(Boolean, default=False, nullable=False)
+    is_private = Column(Boolean, default=False, nullable=False, index=True)
+    is_locked = Column(Boolean, default=False, nullable=False)
+    password_hash = Column(String(255), nullable=True)
     
     created_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

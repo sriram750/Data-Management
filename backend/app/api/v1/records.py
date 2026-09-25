@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -32,9 +32,12 @@ async def list_records(
     search: Optional[str] = None,
     sort_by: Optional[str] = None,
     sort_desc: bool = False,
+    x_table_password: Optional[str] = Header(None, alias="X-Table-Password"),
+    table_password: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    effective_password = x_table_password or table_password
     items, total = await record_service.get_records(
         db=db,
         table_id=table_id,
@@ -44,6 +47,7 @@ async def list_records(
         search=search,
         sort_by=sort_by,
         sort_desc=sort_desc,
+        table_password=effective_password,
     )
     return RecordListResponse(items=items, total=total, page=page, page_size=page_size)
 

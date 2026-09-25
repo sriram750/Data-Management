@@ -6,16 +6,45 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_client_info, get_current_user, get_db, require_permission
+from app.core.exceptions import ForbiddenException
 from app.models.dynamic_table import DataTable
 from app.models.rbac import TablePermission
 from app.models.user import User
 from app.schemas.column import ColumnResponse
 from app.schemas.rbac import TablePermissionCreate, TablePermissionResponse
-from app.schemas.table import TableCreate, TableHistoryResponse, TableListResponse, TableResponse, TableUpdate
+from app.schemas.table import (
+    TableCreate,
+    TableHistoryResponse,
+    TableListResponse,
+    TableLockRequest,
+    TableResponse,
+    TableUnlockRequest,
+    TableUpdate,
+)
 from app.services.rbac_service import rbac_service
 from app.services.table_service import table_service
 
 router = APIRouter(prefix="/tables", tags=["Dynamic Tables"])
+
+
+def format_table_response(table: DataTable, record_count: int = 0) -> TableResponse:
+    cols = [ColumnResponse.model_validate(c) for c in table.columns]
+    return TableResponse(
+        id=table.id,
+        name=table.name,
+        display_name=table.display_name,
+        description=table.description,
+        is_active=table.is_active,
+        is_favorite=table.is_favorite,
+        is_private=bool(table.is_private),
+        is_locked=bool(table.is_locked),
+        has_password=bool(table.password_hash),
+        columns=cols,
+        record_count=record_count,
+        created_at=table.created_at,
+        updated_at=table.updated_at,
+        created_by_id=table.created_by_id,
+    )
 
 
 @router.get("", response_model=TableListResponse)
@@ -34,22 +63,7 @@ async def list_tables(
         if not t_perms["can_view_records"]:
             continue
 
-        cols = [ColumnResponse.model_validate(c) for c in table.columns]
-        items.append(
-            TableResponse(
-                id=table.id,
-                name=table.name,
-                display_name=table.display_name,
-                description=table.description,
-                is_active=table.is_active,
-                is_favorite=table.is_favorite,
-                columns=cols,
-                record_count=rec_count,
-                created_at=table.created_at,
-                updated_at=table.updated_at,
-                created_by_id=table.created_by_id,
-            )
-        )
+        items.append(format_table_response(table, rec_count))
 
     return TableListResponse(items=items, total=len(items))
 
@@ -65,22 +79,10 @@ async def list_trash_tables(
 
     items = []
     for table, rec_count in table_rows:
-        cols = [ColumnResponse.model_validate(c) for c in table.columns]
-        items.append(
-            TableResponse(
-                id=table.id,
-                name=table.name,
-                display_name=table.display_name,
-                description=table.description,
-                is_active=table.is_active,
-                is_favorite=table.is_favorite,
-                columns=cols,
-                record_count=rec_count,
-                created_at=table.created_at,
-                updated_at=table.updated_at,
-                created_by_id=table.created_by_id,
-            )
-        )
+        t_perms = await rbac_service.get_effective_table_permission(db, current_user, table.id)
+        if not t_perms["can_view_records"]:
+            continue
+        items.append(format_table_response(table, rec_count))
 
     return TableListResponse(items=items, total=len(items))
 
@@ -96,20 +98,7 @@ async def create_table(
     table = await table_service.create_table(
         db=db, req=req, user=current_user, ip_address=ip_address, user_agent=user_agent
     )
-    cols = [ColumnResponse.model_validate(c) for c in table.columns]
-    return TableResponse(
-        id=table.id,
-        name=table.name,
-        display_name=table.display_name,
-        description=table.description,
-        is_active=table.is_active,
-        is_favorite=table.is_favorite,
-        columns=cols,
-        record_count=0,
-        created_at=table.created_at,
-        updated_at=table.updated_at,
-        created_by_id=table.created_by_id,
-    )
+    return format_table_response(table, 0)
 
 
 @router.get("/{table_id}", response_model=TableResponse)
@@ -119,20 +108,54 @@ async def get_table(
     db: AsyncSession = Depends(get_db),
 ):
     table = await table_service.get_table_by_id(db, table_id)
-    cols = [ColumnResponse.model_validate(c) for c in table.columns]
-    return TableResponse(
-        id=table.id,
-        name=table.name,
-        display_name=table.display_name,
-        description=table.description,
-        is_active=table.is_active,
-        is_favorite=table.is_favorite,
-        columns=cols,
-        record_count=0,
-        created_at=table.created_at,
-        updated_at=table.updated_at,
-        created_by_id=table.created_by_id,
+    t_perms = await rbac_service.get_effective_table_permission(db, current_user, table.id)
+    if not t_perms["can_view_records"]:
+        raise ForbiddenException("This table is private. Only the creator and Super Administrators can view it.")
+    return format_table_response(table, 0)
+
+
+@router.post("/{table_id}/unlock")
+async def unlock_table(
+    table_id: UUID,
+    req: TableUnlockRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unlock a locked table using table password."""
+    success = await table_service.unlock_table(db, table_id, req.password, current_user)
+    if not success:
+        raise ForbiddenException("Incorrect table password.")
+    return {"message": "Table unlocked successfully", "unlocked": True}
+
+
+@router.put("/{table_id}/lock", response_model=TableResponse)
+async def lock_table(
+    table_id: UUID,
+    req: TableLockRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Modify table lock, password protection, and public/private status."""
+    table = await table_service.get_table_by_id(db, table_id)
+    user_perms = await rbac_service.get_user_permissions(db, current_user)
+    is_owner = bool(table.created_by_id and table.created_by_id == current_user.id)
+    if not (current_user.is_super_admin or is_owner or "table:manage_permissions" in user_perms):
+        raise ForbiddenException("Only the table creator or Super Admin can modify table lock and privacy settings.")
+
+    ip_address, user_agent = await get_client_info(request)
+    updated_table = await table_service.set_table_lock(
+        db=db,
+        table_id=table_id,
+        is_locked=req.is_locked,
+        is_private=req.is_private,
+        password=req.password,
+        current_password=req.current_password,
+        user=current_user,
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
+    return format_table_response(updated_table)
 
 
 @router.put("/{table_id}", response_model=TableResponse)
@@ -147,20 +170,7 @@ async def update_table(
     table = await table_service.update_table(
         db=db, table_id=table_id, req=req, user=current_user, ip_address=ip_address, user_agent=user_agent
     )
-    cols = [ColumnResponse.model_validate(c) for c in table.columns]
-    return TableResponse(
-        id=table.id,
-        name=table.name,
-        display_name=table.display_name,
-        description=table.description,
-        is_active=table.is_active,
-        is_favorite=table.is_favorite,
-        columns=cols,
-        record_count=0,
-        created_at=table.created_at,
-        updated_at=table.updated_at,
-        created_by_id=table.created_by_id,
-    )
+    return format_table_response(table, 0)
 
 
 @router.delete("/{table_id}")
@@ -188,20 +198,7 @@ async def restore_table(
     table = await table_service.restore_table(
         db=db, table_id=table_id, user=current_user, ip_address=ip_address, user_agent=user_agent
     )
-    cols = [ColumnResponse.model_validate(c) for c in table.columns]
-    return TableResponse(
-        id=table.id,
-        name=table.name,
-        display_name=table.display_name,
-        description=table.description,
-        is_active=table.is_active,
-        is_favorite=table.is_favorite,
-        columns=cols,
-        record_count=0,
-        created_at=table.created_at,
-        updated_at=table.updated_at,
-        created_by_id=table.created_by_id,
-    )
+    return format_table_response(table, 0)
 
 
 @router.delete("/{table_id}/permanent")

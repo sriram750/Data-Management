@@ -54,7 +54,9 @@ import {
   FitScreen,
   Fullscreen,
   FullscreenExit,
+  KeyOutlined,
   LastPage,
+  LockOutlined,
   MailOutlined,
   OpenInNew,
   PlaylistAdd,
@@ -64,6 +66,7 @@ import {
   Remove,
   RestoreFromTrashOutlined,
   Search,
+  SecurityOutlined,
   SettingsOutlined,
   TableView,
   Undo,
@@ -194,6 +197,13 @@ export const DynamicGridPage: React.FC = () => {
     Array<{ recordId: string; colName: string; prevValue: any; newValue: any }>
   >([]);
 
+  // Table Lock & Password Protection State
+  const [tableLockedPrompt, setTableLockedPrompt] = useState(false);
+  const [promptPassword, setPromptPassword] = useState('');
+  const [promptShowPassword, setPromptShowPassword] = useState(false);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [promptUnlocking, setPromptUnlocking] = useState(false);
+
   const fetchTableAndRecords = async () => {
     if (!tableId) return;
     setLoading(true);
@@ -202,13 +212,27 @@ export const DynamicGridPage: React.FC = () => {
       const tRes = await apiClient.get<DataTable>(`/tables/${tableId}`);
       setTable(tRes.data);
 
+      const cachedPassword = sessionStorage.getItem(`table_unlocked_${tableId}`);
+
+      if ((tRes.data.is_locked || tRes.data.has_password) && !cachedPassword) {
+        setTableLockedPrompt(true);
+        setLoading(false);
+        return;
+      }
+
       // 2. Fetch records with pagination (support 500 & All records)
       const effectivePageSize = pageSize === -1 ? 100000 : pageSize;
       const effectivePage = pageSize === -1 ? 1 : page;
 
+      const headers: Record<string, string> = {};
+      if (cachedPassword) {
+        headers['X-Table-Password'] = cachedPassword;
+      }
+
       const rRes = await apiClient.get<{ items: DataRecord[]; total: number }>(
         `/tables/${tableId}/records`,
         {
+          headers,
           params: {
             search: search || undefined,
             page: effectivePage,
@@ -218,10 +242,34 @@ export const DynamicGridPage: React.FC = () => {
       );
       setRecords(rRes.data.items);
       setTotalRecords(rRes.data.total);
-    } catch (err) {
-      console.error('Failed to load table and records', err);
+      setTableLockedPrompt(false);
+    } catch (err: any) {
+      if (err.response?.status === 403 && (err.response?.data?.detail?.includes('TABLE_LOCKED') || err.response?.data?.detail?.includes('locked'))) {
+        setTableLockedPrompt(true);
+      } else {
+        console.error('Failed to load table and records', err);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUnlockTable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tableId || !promptPassword.trim()) return;
+    setPromptUnlocking(true);
+    setPromptError(null);
+    try {
+      await apiClient.post(`/tables/${tableId}/unlock`, {
+        password: promptPassword.trim(),
+      });
+      sessionStorage.setItem(`table_unlocked_${tableId}`, promptPassword.trim());
+      setTableLockedPrompt(false);
+      await fetchTableAndRecords();
+    } catch (err: any) {
+      setPromptError(err.response?.data?.detail || 'Incorrect table password.');
+    } finally {
+      setPromptUnlocking(false);
     }
   };
 
@@ -1132,6 +1180,122 @@ export const DynamicGridPage: React.FC = () => {
     );
   }
 
+  if (tableLockedPrompt && table) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '70vh',
+          p: 3,
+        }}
+      >
+        <Paper
+          elevation={4}
+          sx={{
+            p: 4.5,
+            maxWidth: 480,
+            width: '100%',
+            borderRadius: 3.5,
+            textAlign: 'center',
+            border: '1px solid',
+            borderColor: 'warning.light',
+            bgcolor: 'background.paper',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+          }}
+        >
+          <Box
+            sx={{
+              width: 72,
+              height: 72,
+              borderRadius: '50%',
+              bgcolor: 'warning.lighter',
+              color: 'warning.main',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              mx: 'auto',
+              mb: 2.5,
+              boxShadow: '0 4px 20px rgba(255, 152, 0, 0.25)',
+            }}
+          >
+            <LockOutlined sx={{ fontSize: 40 }} />
+          </Box>
+
+          <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>
+            Table Access Locked
+          </Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.secondary', mb: 2 }}>
+            {table.display_name}
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+            This table is protected with a security password. Enter the password below to unlock and access records.
+          </Typography>
+
+          {promptError && (
+            <Alert severity="error" sx={{ mb: 2.5, textAlign: 'left' }} onClose={() => setPromptError(null)}>
+              {promptError}
+            </Alert>
+          )}
+
+          <form onSubmit={handleUnlockTable}>
+            <TextField
+              fullWidth
+              size="medium"
+              autoFocus
+              type={promptShowPassword ? 'text' : 'password'}
+              label="Table Security Password"
+              placeholder="Enter password..."
+              value={promptPassword}
+              onChange={(e) => setPromptPassword(e.target.value)}
+              required
+              sx={{ mb: 3 }}
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => setPromptShowPassword(!promptShowPassword)}
+                        edge="end"
+                      >
+                        {promptShowPassword ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button
+                variant="outlined"
+                fullWidth
+                size="large"
+                onClick={() => navigate('/tables')}
+              >
+                Back to Tables
+              </Button>
+              <Button
+                type="submit"
+                variant="contained"
+                color="warning"
+                fullWidth
+                size="large"
+                disabled={!promptPassword.trim() || promptUnlocking}
+                startIcon={promptUnlocking ? <CircularProgress size={20} color="inherit" /> : <KeyOutlined />}
+                sx={{ fontWeight: 700 }}
+              >
+                {promptUnlocking ? 'Unlocking...' : 'Unlock Table'}
+              </Button>
+            </Box>
+          </form>
+        </Paper>
+      </Box>
+    );
+  }
+
   if (!table) {
     return (
       <Alert severity="error" sx={{ mt: 3 }}>
@@ -1172,7 +1336,7 @@ export const DynamicGridPage: React.FC = () => {
             <TableView fontSize="medium" />
           </Box>
           <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <Typography variant="h5" sx={{ fontWeight: 800, lineHeight: 1.2 }}>
                 {table.display_name}
               </Typography>
@@ -1182,6 +1346,28 @@ export const DynamicGridPage: React.FC = () => {
                 variant="outlined"
                 sx={{ height: 20, fontSize: '0.7rem', fontWeight: 600 }}
               />
+              {table.is_private && (
+                <Tooltip title="Private Table: Visible only to creator and Super Admins">
+                  <Chip
+                    icon={<LockOutlined sx={{ fontSize: '0.8rem !important' }} />}
+                    label="Private"
+                    size="small"
+                    color="secondary"
+                    sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }}
+                  />
+                </Tooltip>
+              )}
+              {(table.is_locked || table.has_password) && (
+                <Tooltip title="Password Protected Table">
+                  <Chip
+                    icon={<KeyOutlined sx={{ fontSize: '0.8rem !important' }} />}
+                    label="Locked"
+                    size="small"
+                    color="warning"
+                    sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }}
+                  />
+                </Tooltip>
+              )}
             </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {totalRecords} records &bull; Table ID: <code>{table.name}</code> &bull; Double-click row to edit

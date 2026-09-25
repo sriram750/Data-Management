@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.encryption import SensitiveEncryptionService, encryption_service
 from app.core.exceptions import ForbiddenException, NotFoundException, ValidationException
+from app.core.security import verify_password
 from app.models.audit_log import AuditAction
 from app.models.dynamic_column import ColumnType, DataColumn
 from app.models.dynamic_record import DataRecord
@@ -123,6 +124,7 @@ class RecordService:
         filters: Optional[Dict[str, Any]] = None,
         sort_by: Optional[str] = None,
         sort_desc: bool = False,
+        table_password: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         # 1. Fetch table and columns
         table_res = await db.execute(
@@ -136,6 +138,11 @@ class RecordService:
         t_perms = await rbac_service.get_effective_table_permission(db, user, table_id)
         if not t_perms["can_view_records"]:
             raise ForbiddenException("You do not have permission to view records in this table.")
+
+        # 2b. Check table password lock if configured (even super admin must enter password)
+        if table.is_locked and table.password_hash:
+            if not table_password or not verify_password(table_password.strip(), table.password_hash):
+                raise ForbiddenException("TABLE_LOCKED: Valid table password is required to access records.")
 
         col_perms = await rbac_service.get_effective_column_permissions(db, user, table_id)
 

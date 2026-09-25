@@ -33,6 +33,9 @@ import {
   AdminPanelSettingsOutlined,
   DeleteOutlined,
   GroupOutlined,
+  KeyOutlined,
+  LockOutlined,
+  LockOpenOutlined,
   PersonOutlined,
   SecurityOutlined,
 } from '@mui/icons-material';
@@ -60,8 +63,29 @@ export const TablePermissionsModal: React.FC<Props> = ({ open, onClose, table })
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(table.is_private);
+  const [savingPrivacy, setSavingPrivacy] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const handleTogglePrivacy = async () => {
+    setSavingPrivacy(true);
+    setError(null);
+    try {
+      const newStatus = !isPrivate;
+      await apiClient.put(`/tables/${table.id}/lock`, {
+        is_private: newStatus,
+      });
+      setIsPrivate(newStatus);
+      table.is_private = newStatus;
+      setSuccess(`Table is now ${newStatus ? 'Private (Creator & Super Admin only)' : 'Public (Standard RBAC)'}`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to change table privacy status.');
+    } finally {
+      setSavingPrivacy(false);
+    }
+  };
 
   // Table Level Permissions
   const [canView, setCanView] = useState(true);
@@ -272,6 +296,43 @@ export const TablePermissionsModal: React.FC<Props> = ({ open, onClose, table })
             {success}
           </Alert>
         )}
+
+        {/* Table Visibility & Lock Master Status */}
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 2,
+            mb: 2.5,
+            borderRadius: 2,
+            bgcolor: isPrivate ? 'rgba(124, 77, 255, 0.06)' : 'background.paper',
+            borderColor: isPrivate ? 'secondary.main' : 'divider',
+          }}
+        >
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              {isPrivate ? <LockOutlined color="secondary" /> : <LockOpenOutlined color="action" />}
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                  Table Visibility: {isPrivate ? 'Private (Creator & Super Admin Only)' : 'Public (Standard RBAC)'}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                  {isPrivate
+                    ? '🔒 Only the table creator and Super Administrators can view or access this table. Role rules below are overridden.'
+                    : '🌐 Standard role permissions below determine which users and roles have access.'}
+                </Typography>
+              </Box>
+            </Box>
+            <Button
+              size="small"
+              variant={isPrivate ? 'contained' : 'outlined'}
+              color={isPrivate ? 'secondary' : 'primary'}
+              onClick={handleTogglePrivacy}
+              disabled={savingPrivacy}
+            >
+              {savingPrivacy ? <CircularProgress size={16} /> : isPrivate ? 'Make Table Public' : 'Lock Table as Private'}
+            </Button>
+          </Box>
+        </Paper>
 
         {/* Informational Guidance Box */}
         <Box

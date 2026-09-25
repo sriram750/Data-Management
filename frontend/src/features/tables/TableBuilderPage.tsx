@@ -10,7 +10,9 @@ import {
   CircularProgress,
   Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
+  InputAdornment,
   MenuItem,
   Paper,
   Select,
@@ -31,8 +33,14 @@ import {
   ArrowDownward,
   ArrowUpward,
   DeleteOutlined,
+  KeyOutlined,
+  LockOutlined,
+  LockOpenOutlined,
   SaveOutlined,
+  SecurityOutlined,
   TableChartOutlined,
+  Visibility,
+  VisibilityOff,
 } from '@mui/icons-material';
 
 import { apiClient } from '../../api/client';
@@ -76,6 +84,10 @@ export const TableBuilderPage: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [tableName, setTableName] = useState('');
   const [description, setDescription] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -211,6 +223,9 @@ export const TableBuilderPage: React.FC = () => {
         name: tableName.trim() || displayName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
         display_name: displayName.trim(),
         description: description.trim() || null,
+        is_private: isPrivate,
+        is_locked: isLocked || Boolean(password.trim()),
+        password: password.trim() || null,
         columns: formattedColumns,
       });
 
@@ -438,6 +453,120 @@ export const TableBuilderPage: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
+          </CardContent>
+        </Card>
+
+        {/* Security, Lock & Privacy Access Card */}
+        <Card sx={{ mb: 3.5, borderRadius: 3, border: isPrivate ? '1px solid #7c4dff' : undefined }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+              <SecurityOutlined color={isPrivate ? 'secondary' : 'primary'} />
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                Table Access Security & Lock Controls
+              </Typography>
+            </Box>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2.5 }}>
+              Configure visibility restrictions, table locks, and password protection for this dataset.
+            </Typography>
+            <Divider sx={{ mb: 3 }} />
+
+            <Grid container spacing={3}>
+              {/* Privacy Toggle */}
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2.5,
+                    borderRadius: 2.5,
+                    height: '100%',
+                    bgcolor: isPrivate ? 'rgba(124, 77, 255, 0.05)' : 'background.paper',
+                    borderColor: isPrivate ? 'secondary.main' : 'divider',
+                  }}
+                >
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      {isPrivate ? <LockOutlined color="secondary" /> : <LockOpenOutlined color="action" />}
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        {isPrivate ? 'Private Table (Locked to Creator & Super Admin)' : 'Public Table (Standard RBAC)'}
+                      </Typography>
+                    </Box>
+                    <Switch
+                      checked={isPrivate}
+                      onChange={(e) => setIsPrivate(e.target.checked)}
+                      color="secondary"
+                    />
+                  </Box>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
+                    {isPrivate
+                      ? '🔒 Only you (the creator) and Super Administrators will be able to see or access this table. Other users and roles will NOT see this table at all.'
+                      : '🌐 Table visibility follows standard role-based access rules (RBAC). Permitted roles will be able to see and interact with it.'}
+                  </Typography>
+                </Paper>
+              </Grid>
+
+              {/* Password Protection Lock */}
+              <Grid size={{ xs: 12, md: 6 }}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2.5,
+                    borderRadius: 2.5,
+                    height: '100%',
+                    bgcolor: isLocked ? 'rgba(255, 152, 0, 0.05)' : 'background.paper',
+                    borderColor: isLocked ? 'warning.main' : 'divider',
+                  }}
+                >
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <KeyOutlined color={isLocked ? 'warning' : 'action'} />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                        {isLocked ? 'Password Protection Enabled' : 'Optional Password Lock'}
+                      </Typography>
+                    </Box>
+                    <Switch
+                      checked={isLocked}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIsLocked(checked);
+                        if (!checked) setPassword('');
+                      }}
+                      color="warning"
+                    />
+                  </Box>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+                    Require a security password to unlock and view the table records.
+                  </Typography>
+
+                  {isLocked && (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type={showPassword ? 'text' : 'password'}
+                      label="Table Access Password"
+                      placeholder="Enter a secret password or PIN..."
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      helperText="Anyone without Super Admin or Creator role must enter this password to view table data."
+                      slotProps={{
+                        input: {
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                size="small"
+                                onClick={() => setShowPassword(!showPassword)}
+                                edge="end"
+                              >
+                                {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        },
+                      }}
+                    />
+                  )}
+                </Paper>
+              </Grid>
+            </Grid>
           </CardContent>
         </Card>
 

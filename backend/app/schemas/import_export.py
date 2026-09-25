@@ -62,6 +62,9 @@ class ImportExecuteRequest(BaseModel):
     new_table_name: Optional[str] = None
     new_table_display_name: Optional[str] = None
     new_table_description: Optional[str] = None
+    is_private: bool = False
+    is_locked: bool = False
+    password: Optional[str] = None
     existing_table_id: Optional[UUID] = None
     matching_key_column: Optional[str] = None
     columns: List[ColumnMappingConfig]

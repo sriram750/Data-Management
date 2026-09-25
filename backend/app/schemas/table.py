@@ -9,10 +9,13 @@ class TableBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     display_name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    is_private: bool = False
+    is_locked: bool = False
 
 
 class TableCreate(TableBase):
     columns: List[ColumnCreate] = []
+    password: Optional[str] = None
 
 
 class TableUpdate(BaseModel):
@@ -20,12 +23,30 @@ class TableUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     is_favorite: Optional[bool] = None
+    is_private: Optional[bool] = None
+    is_locked: Optional[bool] = None
+    password: Optional[str] = None
+    current_password: Optional[str] = None
+
+
+class TableLockRequest(BaseModel):
+    is_locked: Optional[bool] = None
+    is_private: Optional[bool] = None
+    password: Optional[str] = None
+    current_password: Optional[str] = None
+
+
+class TableUnlockRequest(BaseModel):
+    password: str
 
 
 class TableResponse(TableBase):
     id: UUID
     is_active: bool
     is_favorite: bool
+    is_private: bool = False
+    is_locked: bool = False
+    has_password: bool = False
     columns: List[ColumnResponse] = []
     record_count: int = 0
     created_at: datetime

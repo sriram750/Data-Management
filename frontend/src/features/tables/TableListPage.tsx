@@ -13,9 +13,11 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   Paper,
+  Switch,
   Tab,
   Table,
   TableBody,
@@ -36,12 +38,19 @@ import {
   DeleteOutlined,
   FileUploadOutlined,
   HistoryOutlined,
+  KeyOutlined,
+  LockOutlined,
+  LockOpenOutlined,
+  PublicOutlined,
   RestoreFromTrashOutlined,
   Search,
+  SecurityOutlined,
   Star,
   StarBorder,
   TableChartOutlined,
   TableView,
+  Visibility,
+  VisibilityOff,
 } from '@mui/icons-material';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -80,6 +89,24 @@ export const TableListPage: React.FC = () => {
 
   // Table Permissions Modal State
   const [permissionsTable, setPermissionsTable] = useState<DataTable | null>(null);
+
+  // Table Security / Lock Modal State
+  const [securityTable, setSecurityTable] = useState<DataTable | null>(null);
+  const [securityIsPrivate, setSecurityIsPrivate] = useState(false);
+  const [securityIsLocked, setSecurityIsLocked] = useState(false);
+  const [securityPassword, setSecurityPassword] = useState('');
+  const [securityCurrentPassword, setSecurityCurrentPassword] = useState('');
+  const [showSecurityPassword, setShowSecurityPassword] = useState(false);
+  const [showSecurityCurrentPassword, setShowSecurityCurrentPassword] = useState(false);
+  const [securityError, setSecurityError] = useState<string | null>(null);
+  const [securitySaving, setSecuritySaving] = useState(false);
+
+  // Table Unlock Modal State (Prompt when opening locked table)
+  const [unlockTable, setUnlockTable] = useState<DataTable | null>(null);
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [showUnlockPassword, setShowUnlockPassword] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
 
   const fetchActiveTables = async () => {
     try {
@@ -192,6 +219,74 @@ export const TableListPage: React.FC = () => {
       await fetchAllData();
     } catch (err: any) {
       setActionError(err.response?.data?.detail || 'Failed to restore record.');
+    }
+  };
+
+  // Open Security & Lock settings modal
+  const handleOpenSecurity = (e: React.MouseEvent, table: DataTable) => {
+    e.stopPropagation();
+    setSecurityTable(table);
+    setSecurityIsPrivate(table.is_private);
+    setSecurityIsLocked(table.is_locked || table.has_password);
+    setSecurityPassword('');
+    setSecurityCurrentPassword('');
+    setShowSecurityPassword(false);
+    setShowSecurityCurrentPassword(false);
+    setSecurityError(null);
+  };
+
+  // Save Security & Lock settings
+  const handleSaveSecurity = async () => {
+    if (!securityTable) return;
+    setSecuritySaving(true);
+    setSecurityError(null);
+    try {
+      const res = await apiClient.put<DataTable>(`/tables/${securityTable.id}/lock`, {
+        is_private: securityIsPrivate,
+        is_locked: securityIsLocked,
+        password: securityPassword.trim() ? securityPassword.trim() : (securityIsLocked ? undefined : ''),
+        current_password: securityCurrentPassword.trim() || undefined,
+      });
+      setTables((prev) => prev.map((t) => (t.id === securityTable.id ? res.data : t)));
+      setActionSuccess(`Security settings for "${securityTable.display_name}" updated successfully.`);
+      setSecurityTable(null);
+    } catch (err: any) {
+      setSecurityError(err.response?.data?.detail || 'Failed to update table security settings.');
+    } finally {
+      setSecuritySaving(false);
+    }
+  };
+
+  // Card click with Lock check (even Super Admin must enter password)
+  const handleCardClick = (table: DataTable) => {
+    const isUnlocked = sessionStorage.getItem(`table_unlocked_${table.id}`);
+    if ((table.is_locked || table.has_password) && !isUnlocked) {
+      setUnlockTable(table);
+      setUnlockPassword('');
+      setUnlockError(null);
+      return;
+    }
+    navigate(`/tables/${table.id}`);
+  };
+
+  // Unlock table with password
+  const handleUnlockSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!unlockTable) return;
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      await apiClient.post(`/tables/${unlockTable.id}/unlock`, {
+        password: unlockPassword,
+      });
+      sessionStorage.setItem(`table_unlocked_${unlockTable.id}`, unlockPassword);
+      const targetId = unlockTable.id;
+      setUnlockTable(null);
+      navigate(`/tables/${targetId}`);
+    } catch (err: any) {
+      setUnlockError(err.response?.data?.detail || 'Incorrect password.');
+    } finally {
+      setUnlocking(false);
     }
   };
 
@@ -375,19 +470,52 @@ export const TableListPage: React.FC = () => {
                         boxShadow: '0 12px 30px rgba(0,0,0,0.2)',
                       },
                     }}
-                    onClick={() => navigate(`/tables/${table.id}`)}
+                    onClick={() => handleCardClick(table)}
                   >
                     <Box
                       sx={{ flexGrow: 1, p: 2.5, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
                     >
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', mb: 1.5 }}>
-                        <Chip
-                          icon={<TableChartOutlined sx={{ fontSize: '1rem !important' }} />}
-                          label={`${table.columns?.length || 0} Columns`}
-                          size="small"
-                          color="primary"
-                          variant="outlined"
-                        />
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, flexWrap: 'wrap' }}>
+                          <Chip
+                            icon={<TableChartOutlined sx={{ fontSize: '0.9rem !important' }} />}
+                            label={`${table.columns?.length || 0} Cols`}
+                            size="small"
+                            color="primary"
+                            variant="outlined"
+                          />
+                          {table.is_private && (
+                            <Tooltip title="Private Table: Only the creator and Super Admins can access">
+                              <Chip
+                                icon={<LockOutlined sx={{ fontSize: '0.85rem !important' }} />}
+                                label="Private"
+                                size="small"
+                                color="secondary"
+                                sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                              />
+                            </Tooltip>
+                          )}
+                          {(table.is_locked || table.has_password) && (
+                            <Tooltip title="Password Protected: Password required to view records">
+                              <Chip
+                                icon={<KeyOutlined sx={{ fontSize: '0.85rem !important' }} />}
+                                label="Locked"
+                                size="small"
+                                color="warning"
+                                sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+                              />
+                            </Tooltip>
+                          )}
+                          {!table.is_private && !table.is_locked && !table.has_password && (
+                            <Chip
+                              icon={<PublicOutlined sx={{ fontSize: '0.85rem !important' }} />}
+                              label="Public"
+                              size="small"
+                              variant="outlined"
+                              sx={{ fontSize: '0.72rem', opacity: 0.7 }}
+                            />
+                          )}
+                        </Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                           <Tooltip title={table.is_favorite ? 'Remove from favorites' : 'Add to favorites'}>
                             <IconButton
@@ -396,6 +524,18 @@ export const TableListPage: React.FC = () => {
                               color={table.is_favorite ? 'warning' : 'default'}
                             >
                               {table.is_favorite ? <Star fontSize="small" /> : <StarBorder fontSize="small" />}
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Table Lock & Security Settings">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => handleOpenSecurity(e, table)}
+                              sx={{
+                                color: table.is_private ? 'secondary.main' : table.is_locked ? 'warning.main' : 'text.secondary',
+                                '&:hover': { color: 'primary.main' },
+                              }}
+                            >
+                              <SecurityOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="Manage Table Access & Permissions">
@@ -722,6 +862,266 @@ export const TableListPage: React.FC = () => {
           onClose={() => setPermissionsTable(null)}
           table={permissionsTable}
         />
+      )}
+
+      {/* Table Security & Lock Settings Modal */}
+      {securityTable && (
+        <Dialog
+          open={Boolean(securityTable)}
+          onClose={() => setSecurityTable(null)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SecurityOutlined color="primary" /> Security & Access Locks: {securityTable.display_name}
+          </DialogTitle>
+          <DialogContent dividers>
+            {securityError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setSecurityError(null)}>
+                {securityError}
+              </Alert>
+            )}
+
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+              Control who can see this table and require a password to access records.
+            </Typography>
+
+            {/* Visibility Toggle */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2.5,
+                mb: 2.5,
+                borderRadius: 2,
+                bgcolor: securityIsPrivate ? 'rgba(124, 77, 255, 0.05)' : 'background.paper',
+                borderColor: securityIsPrivate ? 'secondary.main' : 'divider',
+              }}
+            >
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {securityIsPrivate ? <LockOutlined color="secondary" /> : <LockOpenOutlined color="action" />}
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    {securityIsPrivate ? 'Private Table (Strictly Restricted)' : 'Public Table (Standard RBAC)'}
+                  </Typography>
+                </Box>
+                <Switch
+                  checked={securityIsPrivate}
+                  onChange={(e) => setSecurityIsPrivate(e.target.checked)}
+                  color="secondary"
+                />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                {securityIsPrivate
+                  ? '🔒 Only the table creator and Super Administrators can view or access this table. Other users and roles will NOT see this table at all.'
+                  : '🌐 Standard role permissions control who can view and edit this table.'}
+              </Typography>
+            </Paper>
+
+            {/* Password Protection */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2.5,
+                borderRadius: 2,
+                bgcolor: securityIsLocked ? 'rgba(255, 152, 0, 0.05)' : 'background.paper',
+                borderColor: securityIsLocked ? 'warning.main' : 'divider',
+              }}
+            >
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <KeyOutlined color={securityIsLocked ? 'warning' : 'action'} />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    {securityIsLocked ? 'Password Protection Enabled' : 'Password Lock Disabled'}
+                  </Typography>
+                </Box>
+                <Switch
+                  checked={securityIsLocked}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSecurityIsLocked(checked);
+                    if (!checked) setSecurityPassword('');
+                  }}
+                  color="warning"
+                />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 2 }}>
+                {securityIsLocked
+                  ? 'All users (including Super Administrators) must enter the table password to view records.'
+                  : 'No password required to access records if user has table permission.'}
+              </Typography>
+
+              {/* Confirm existing password when disabling lock */}
+              {!securityIsLocked && securityTable.has_password && (
+                <Box sx={{ mt: 1 }}>
+                  <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }}>
+                    Confirm with the existing table password to disable password protection.
+                  </Alert>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type={showSecurityCurrentPassword ? 'text' : 'password'}
+                    label="Current Table Password"
+                    placeholder="Enter existing password to confirm disabling..."
+                    value={securityCurrentPassword}
+                    onChange={(e) => setSecurityCurrentPassword(e.target.value)}
+                    required
+                    slotProps={{
+                      input: {
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              size="small"
+                              onClick={() => setShowSecurityCurrentPassword(!showSecurityCurrentPassword)}
+                              edge="end"
+                            >
+                              {showSecurityCurrentPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      },
+                    }}
+                  />
+                </Box>
+              )}
+
+              {/* Setting or updating password when lock is enabled */}
+              {securityIsLocked && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {securityTable.has_password && (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type={showSecurityCurrentPassword ? 'text' : 'password'}
+                      label="Current Table Password (Required to change password)"
+                      placeholder="Enter existing password..."
+                      value={securityCurrentPassword}
+                      onChange={(e) => setSecurityCurrentPassword(e.target.value)}
+                      slotProps={{
+                        input: {
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                size="small"
+                                onClick={() => setShowSecurityCurrentPassword(!showSecurityCurrentPassword)}
+                                edge="end"
+                              >
+                                {showSecurityCurrentPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        },
+                      }}
+                    />
+                  )}
+
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type={showSecurityPassword ? 'text' : 'password'}
+                    label={securityTable.has_password ? 'New Password (Leave blank to keep current)' : 'Set Access Password'}
+                    placeholder="Enter secret table password..."
+                    value={securityPassword}
+                    onChange={(e) => setSecurityPassword(e.target.value)}
+                    slotProps={{
+                      input: {
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              size="small"
+                              onClick={() => setShowSecurityPassword(!showSecurityPassword)}
+                              edge="end"
+                            >
+                              {showSecurityPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      },
+                    }}
+                  />
+                </Box>
+              )}
+            </Paper>
+          </DialogContent>
+          <DialogActions sx={{ p: 2 }}>
+            <Button onClick={() => setSecurityTable(null)} disabled={securitySaving}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleSaveSecurity}
+              disabled={securitySaving}
+            >
+              {securitySaving ? <CircularProgress size={20} /> : 'Save Security Settings'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      {/* Unlock Table Dialog */}
+      {unlockTable && (
+        <Dialog
+          open={Boolean(unlockTable)}
+          onClose={() => setUnlockTable(null)}
+          maxWidth="xs"
+          fullWidth
+        >
+          <form onSubmit={handleUnlockSubmit}>
+            <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <LockOutlined color="warning" /> Table Access Locked
+            </DialogTitle>
+            <DialogContent>
+              <DialogContentText sx={{ mb: 2 }}>
+                Table <strong>{unlockTable.display_name}</strong> is password-protected. Enter the table security password to view its records.
+              </DialogContentText>
+
+              {unlockError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {unlockError}
+                </Alert>
+              )}
+
+              <TextField
+                fullWidth
+                size="small"
+                autoFocus
+                type={showUnlockPassword ? 'text' : 'password'}
+                label="Table Password"
+                placeholder="Enter password..."
+                value={unlockPassword}
+                onChange={(e) => setUnlockPassword(e.target.value)}
+                required
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          size="small"
+                          onClick={() => setShowUnlockPassword(!showUnlockPassword)}
+                          edge="end"
+                        >
+                          {showUnlockPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  },
+                }}
+              />
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+              <Button onClick={() => setUnlockTable(null)} disabled={unlocking}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="contained"
+                color="warning"
+                disabled={!unlockPassword.trim() || unlocking}
+              >
+                {unlocking ? <CircularProgress size={20} /> : 'Unlock & Open'}
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
       )}
     </Box>
   );

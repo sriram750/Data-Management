@@ -24,12 +24,29 @@ from app.core.exceptions import AppException
 from app.core.logging import logger
 
 
+def _ensure_schema_migrations(connection):
+    from sqlalchemy import text
+    try:
+        res = connection.execute(text("PRAGMA table_info(data_tables)"))
+        existing_cols = {row[1] for row in res.fetchall()}
+        if existing_cols:
+            if "is_private" not in existing_cols:
+                connection.execute(text("ALTER TABLE data_tables ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0"))
+            if "is_locked" not in existing_cols:
+                connection.execute(text("ALTER TABLE data_tables ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT 0"))
+            if "password_hash" not in existing_cols:
+                connection.execute(text("ALTER TABLE data_tables ADD COLUMN password_hash VARCHAR(255) NULL"))
+    except Exception as e:
+        logger.warning(f"Schema migration check notice: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}...")
     # Initialize database tables
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_schema_migrations)
     logger.info("Database schemas verified.")
     yield
     logger.info("Shutting down application...")

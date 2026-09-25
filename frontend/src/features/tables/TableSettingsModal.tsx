@@ -14,6 +14,7 @@ import {
   FormControl,
   FormControlLabel,
   IconButton,
+  InputAdornment,
   InputLabel,
   MenuItem,
   Paper,
@@ -36,8 +37,14 @@ import {
   ArrowUpward,
   DeleteOutlined,
   Edit,
+  KeyOutlined,
+  LockOutlined,
+  LockOpenOutlined,
   SaveOutlined,
+  SecurityOutlined,
   Settings,
+  Visibility,
+  VisibilityOff,
   WarningAmberOutlined,
 } from '@mui/icons-material';
 
@@ -76,6 +83,13 @@ export const TableSettingsModal: React.FC<Props> = ({ open, onClose, table, onUp
   const [displayName, setDisplayName] = useState(table.display_name);
   const [description, setDescription] = useState(table.description || '');
   const [columns, setColumns] = useState<DataColumn[]>(table.columns);
+  const [isPrivate, setIsPrivate] = useState(table.is_private);
+  const [isLocked, setIsLocked] = useState(table.is_locked || table.has_password);
+  const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // New column input
   const [isAddingCol, setIsAddingCol] = useState(false);
@@ -100,11 +114,17 @@ export const TableSettingsModal: React.FC<Props> = ({ open, onClose, table, onUp
   const handleSaveMetadata = async () => {
     setLoading(true);
     setError(null);
+    setSuccess(null);
     try {
       await apiClient.put(`/tables/${table.id}`, {
         display_name: displayName.trim(),
         description: description.trim() || null,
+        is_private: isPrivate,
+        is_locked: isLocked,
+        password: password.trim() ? password.trim() : (isLocked ? undefined : ''),
+        current_password: currentPassword.trim() || undefined,
       });
+      setSuccess('Table settings and security rules updated successfully.');
       onUpdated();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to update table metadata.');
@@ -220,12 +240,17 @@ export const TableSettingsModal: React.FC<Props> = ({ open, onClose, table, onUp
             {error}
           </Alert>
         )}
+        {success && (
+          <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>
+            {success}
+          </Alert>
+        )}
 
         {/* General Info */}
         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5 }}>
           Table Details
         </Typography>
-        <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid container spacing={2} sx={{ mb: 2 }}>
           <Grid size={{ xs: 12, sm: 6 }}>
             <TextField
               fullWidth
@@ -244,9 +269,179 @@ export const TableSettingsModal: React.FC<Props> = ({ open, onClose, table, onUp
               onChange={(e) => setDescription(e.target.value)}
             />
           </Grid>
+        </Grid>
+
+        {/* Security & Access Lock Controls */}
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <SecurityOutlined fontSize="small" color="primary" /> Security & Access Controls
+        </Typography>
+        <Grid container spacing={2} sx={{ mb: 2.5 }}>
+          {/* Privacy Switch */}
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 2,
+                height: '100%',
+                bgcolor: isPrivate ? 'rgba(124, 77, 255, 0.05)' : 'background.paper',
+                borderColor: isPrivate ? 'secondary.main' : 'divider',
+              }}
+            >
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {isPrivate ? <LockOutlined color="secondary" fontSize="small" /> : <LockOpenOutlined color="action" fontSize="small" />}
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {isPrivate ? 'Private Table' : 'Public Table'}
+                  </Typography>
+                </Box>
+                <Switch
+                  size="small"
+                  checked={isPrivate}
+                  onChange={(e) => setIsPrivate(e.target.checked)}
+                  color="secondary"
+                />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }}>
+                {isPrivate
+                  ? '🔒 Only creator & Super Admin can view/access this table.'
+                  : '🌐 Standard role permissions control access to this table.'}
+              </Typography>
+            </Paper>
+          </Grid>
+
+          {/* Password Protection */}
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 2,
+                height: '100%',
+                bgcolor: isLocked ? 'rgba(255, 152, 0, 0.05)' : 'background.paper',
+                borderColor: isLocked ? 'warning.main' : 'divider',
+              }}
+            >
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <KeyOutlined color={isLocked ? 'warning' : 'action'} fontSize="small" />
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {isLocked ? 'Password Lock Enabled' : 'Password Lock Off'}
+                  </Typography>
+                </Box>
+                <Switch
+                  size="small"
+                  checked={isLocked}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIsLocked(checked);
+                    if (!checked) setPassword('');
+                  }}
+                  color="warning"
+                />
+              </Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: isLocked ? 1.5 : 0 }}>
+                {isLocked
+                  ? 'All users (including Super Admin) must enter password to view records.'
+                  : 'No password required.'}
+              </Typography>
+
+              {/* Confirm existing password when disabling lock */}
+              {!isLocked && table.has_password && (
+                <Box sx={{ mt: 1 }}>
+                  <Alert severity="warning" sx={{ mb: 1, py: 0.25, fontSize: '0.75rem' }}>
+                    Confirm existing password to disable lock.
+                  </Alert>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    label="Current Password"
+                    placeholder="Enter existing password to confirm..."
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    required
+                    slotProps={{
+                      input: {
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              size="small"
+                              onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                              edge="end"
+                            >
+                              {showCurrentPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      },
+                    }}
+                  />
+                </Box>
+              )}
+
+              {/* Setting or changing password */}
+              {isLocked && (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {table.has_password && (
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      label="Current Password (Required to change)"
+                      placeholder="Enter existing password..."
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      slotProps={{
+                        input: {
+                          endAdornment: (
+                            <InputAdornment position="end">
+                              <IconButton
+                                size="small"
+                                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                                edge="end"
+                              >
+                                {showCurrentPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                              </IconButton>
+                            </InputAdornment>
+                          ),
+                        },
+                      }}
+                    />
+                  )}
+
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type={showPassword ? 'text' : 'password'}
+                    label={table.has_password ? 'New Password (or leave blank)' : 'Set Password'}
+                    placeholder="Enter secret password..."
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    slotProps={{
+                      input: {
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton
+                              size="small"
+                              onClick={() => setShowPassword(!showPassword)}
+                              edge="end"
+                            >
+                              {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      },
+                    }}
+                  />
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
           <Grid size={12}>
-            <Button size="small" variant="outlined" onClick={handleSaveMetadata} disabled={loading}>
-              Save Table Details
+            <Button size="small" variant="contained" onClick={handleSaveMetadata} disabled={loading}>
+              Save Details & Security Rules
             </Button>
           </Grid>
         </Grid>

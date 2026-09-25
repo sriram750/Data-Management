@@ -14,6 +14,7 @@ from app.models.rbac import (
     TablePermission,
     UserRole,
 )
+from app.models.dynamic_table import DataTable
 from app.models.user import User
 
 
@@ -173,6 +174,33 @@ class RBACService:
         """Calculate effective permissions for a user on a specific table."""
         # Super admin has full permissions on all tables
         if user.is_super_admin:
+            return {
+                "can_view_records": True,
+                "can_add_records": True,
+                "can_edit_records": True,
+                "can_delete_records": True,
+                "can_manage_columns": True,
+                "can_manage_permissions": True,
+                "can_import": True,
+                "can_export": True,
+            }
+
+        # Check if table is Private: Only Super Admin and table creator can access
+        table_obj = await db.get(DataTable, table_id)
+        if table_obj and table_obj.is_private:
+            is_creator = bool(table_obj.created_by_id and table_obj.created_by_id == user.id)
+            if not is_creator:
+                return {
+                    "can_view_records": False,
+                    "can_add_records": False,
+                    "can_edit_records": False,
+                    "can_delete_records": False,
+                    "can_manage_columns": False,
+                    "can_manage_permissions": False,
+                    "can_import": False,
+                    "can_export": False,
+                }
+            # Creator has full access to their own private table
             return {
                 "can_view_records": True,
                 "can_add_records": True,
