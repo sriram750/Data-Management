@@ -58,13 +58,13 @@ class Settings(BaseSettings):
     )
 
     def get_sync_database_url(self) -> str:
-        if self.SYNC_DATABASE_URL:
-            return self.SYNC_DATABASE_URL
-        url = self.DATABASE_URL
+        url = self.SYNC_DATABASE_URL or self.DATABASE_URL
         if url.startswith("postgresql+asyncpg://"):
-            return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+            return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        if url.startswith("postgresql://"):
+            return url.replace("postgresql://", "postgresql+psycopg2://", 1)
         if url.startswith("sqlite+aiosqlite:///"):
-            return url.replace("sqlite+aiosqlite:///", "sqlite:///")
+            return url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
         return url
 
 

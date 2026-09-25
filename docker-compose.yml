@@ -37,7 +37,7 @@ services:
       - ENVIRONMENT=production
       - DEBUG=False
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-ChangeThisToSecurePassword123!}@postgres:5432/${POSTGRES_DB:-datamatrix}
-      - SYNC_DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-ChangeThisToSecurePassword123!}@postgres:5432/${POSTGRES_DB:-datamatrix}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-ChangeThisToSecurePassword123!}@postgres:5432/${POSTGRES_DB:-datamatrix}
       - SECRET_KEY=${SECRET_KEY:-e93f77341b590e8c783c4f74d5386b0a88df54817a54a01c432d847fe734ad31}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-${ENCRYPTION_MASTER_KEY:-e93f77341b590e8c783c4f74d5386b0a88df54817a54a01c432d847fe734ad31}}
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-${ENCRYPTION_KEY:-e93f77341b590e8c783c4f74d5386b0a88df54817a54a01c432d847fe734ad31}}
