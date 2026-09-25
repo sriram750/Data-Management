@@ -60,7 +60,11 @@ export const LoginPage: React.FC = () => {
       login(res.data);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid username or password.');
+      if (!err.response || err.response.status >= 500) {
+        setError('Server is currently unreachable (HTTP 502 Bad Gateway). The backend service may still be starting up or encountered an error.');
+      } else {
+        setError(err.response?.data?.detail || 'Invalid username or password.');
+      }
     } finally {
       setLoading(false);
     }
