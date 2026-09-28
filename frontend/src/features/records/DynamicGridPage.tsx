@@ -98,6 +98,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 
+import TableAnalyticsStudio from './TableAnalyticsStudio';
+
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useThemeMode } from '../../context/ThemeContext';
@@ -212,8 +214,8 @@ export const DynamicGridPage: React.FC = () => {
   const [promptError, setPromptError] = useState<string | null>(null);
   const [promptUnlocking, setPromptUnlocking] = useState(false);
 
-  // Active Grid View: 'active' (default), 'trash' (Recycle Bin), 'logs' (Deletion & Audit Logs)
-  const [activeGridView, setActiveGridView] = useState<'active' | 'trash' | 'logs'>('active');
+  // Active Grid View: 'active' (default), 'charts' (Visual Analytics), 'trash' (Recycle Bin), 'logs' (Deletion & Audit Logs)
+  const [activeGridView, setActiveGridView] = useState<'active' | 'charts' | 'trash' | 'logs'>('active');
   const [trashRecords, setTrashRecords] = useState<DeletedRecordItem[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [tableAuditLogs, setTableAuditLogs] = useState<any[]>([]);
@@ -1768,7 +1770,19 @@ export const DynamicGridPage: React.FC = () => {
             }}
           >
             <ToggleButton value="active" sx={{ textTransform: 'none', px: 2, fontWeight: 700, fontSize: '0.8rem' }}>
-              Active Records ({totalRecords})
+              Grid View ({totalRecords})
+            </ToggleButton>
+            <ToggleButton
+              value="charts"
+              sx={{
+                textTransform: 'none',
+                px: 2,
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                color: activeGridView === 'charts' ? '#2563eb !important' : undefined,
+              }}
+            >
+              📊 Charts & Analytics
             </ToggleButton>
             <ToggleButton
               value="trash"
@@ -2253,6 +2267,16 @@ export const DynamicGridPage: React.FC = () => {
               </Button>
             </Box>
           </Box>
+        ) : activeGridView === 'charts' ? (
+          /* Visual Analytics & KPI Studio */
+          <Box sx={{ flexGrow: 1, overflowY: 'auto', p: { xs: 2, md: 3 }, bgcolor: mode === 'dark' ? 'transparent' : '#f8fafc' }}>
+            <TableAnalyticsStudio
+              table={table}
+              records={records}
+              totalRecords={totalRecords}
+              onSwitchToGrid={() => setActiveGridView('active')}
+            />
+          </Box>
         ) : (
           /* Middle Section: Left Action Rail + AG Grid Canvas + Right Scroll Indicator */
           <Box
@@ -2546,110 +2570,112 @@ export const DynamicGridPage: React.FC = () => {
         )}
 
         {/* AG Grid Status & Pagination Bar Matching Reference Monospace Footer */}
-        <Box
-          sx={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            px: 2.5,
-            py: 1.2,
-            bgcolor: mode === 'dark' ? '#0F172A' : '#FAFAFA',
-            borderTop: '1px solid',
-            borderColor: 'divider',
-            flexWrap: 'wrap',
-            gap: 2,
-          }}
-        >
-          {/* Left: Monospace Status Bar matching reference design */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Typography
-              sx={{
-                fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
-                fontSize: '0.8rem',
-                color: mode === 'dark' ? '#94A3B8' : '#64748B',
-                letterSpacing: '0.2px',
-              }}
-            >
-              {totalRecords.toLocaleString()} {table.name.toLowerCase()} &nbsp;&nbsp;&nbsp;&nbsp; {editableColsCount} editable columns &nbsp;&nbsp;&nbsp;&nbsp; {selectedRows.length > 0 ? `${selectedRows.length} selected` : 'full screen marks up a couple of cells'}
-            </Typography>
-          </Box>
-
-          {/* Right: AG Grid Page Navigation & Rows Per Page */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
-                rows:
-              </Typography>
-              <Select
-                size="small"
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1);
-                }}
+        {activeGridView !== 'charts' && (
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              px: 2.5,
+              py: 1.2,
+              bgcolor: mode === 'dark' ? '#0F172A' : '#FAFAFA',
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              flexWrap: 'wrap',
+              gap: 2,
+            }}
+          >
+            {/* Left: Monospace Status Bar matching reference design */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography
                 sx={{
-                  height: 26,
-                  fontSize: '0.75rem',
-                  fontFamily: 'monospace',
-                  borderRadius: 1,
-                  bgcolor: mode === 'dark' ? 'background.paper' : '#FFFFFF',
-                  '& .MuiSelect-select': { py: 0.3, px: 1 },
+                  fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
+                  fontSize: '0.8rem',
+                  color: mode === 'dark' ? '#94A3B8' : '#64748B',
+                  letterSpacing: '0.2px',
                 }}
               >
-                <MenuItem value={10}>10</MenuItem>
-                <MenuItem value={25}>25</MenuItem>
-                <MenuItem value={50}>50</MenuItem>
-                <MenuItem value={100}>100</MenuItem>
-                <MenuItem value={500}>500</MenuItem>
-                <MenuItem value={-1}>All ({totalRecords})</MenuItem>
-              </Select>
+                {totalRecords.toLocaleString()} {table.name.toLowerCase()} &nbsp;&nbsp;&nbsp;&nbsp; {editableColsCount} editable columns &nbsp;&nbsp;&nbsp;&nbsp; {selectedRows.length > 0 ? `${selectedRows.length} selected` : 'full screen marks up a couple of cells'}
+              </Typography>
             </Box>
 
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
-              {pageSize === -1 ? 'all rows' : `${startEntry}-${endEntry} of ${totalRecords}`}
-            </Typography>
-
-            {pageSize !== -1 && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <IconButton
-                  size="small"
-                  disabled={page === 1 || isAllRows}
-                  onClick={() => setPage(1)}
-                  sx={{ p: 0.4 }}
-                >
-                  <FirstPage fontSize="small" />
-                </IconButton>
-                <IconButton
-                  size="small"
-                  disabled={page === 1 || isAllRows}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  sx={{ p: 0.4 }}
-                >
-                  <ChevronLeft fontSize="small" />
-                </IconButton>
-                <Typography variant="caption" sx={{ fontFamily: 'monospace', px: 0.5, fontWeight: 600 }}>
-                  {page}/{totalPages || 1}
+            {/* Right: AG Grid Page Navigation & Rows Per Page */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                  rows:
                 </Typography>
-                <IconButton
+                <Select
                   size="small"
-                  disabled={page >= totalPages || isAllRows}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  sx={{ p: 0.4 }}
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  sx={{
+                    height: 26,
+                    fontSize: '0.75rem',
+                    fontFamily: 'monospace',
+                    borderRadius: 1,
+                    bgcolor: mode === 'dark' ? 'background.paper' : '#FFFFFF',
+                    '& .MuiSelect-select': { py: 0.3, px: 1 },
+                  }}
                 >
-                  <ChevronRight fontSize="small" />
-                </IconButton>
-                <IconButton
-                  size="small"
-                  disabled={page >= totalPages || isAllRows}
-                  onClick={() => setPage(totalPages)}
-                  sx={{ p: 0.4 }}
-                >
-                  <LastPage fontSize="small" />
-                </IconButton>
+                  <MenuItem value={10}>10</MenuItem>
+                  <MenuItem value={25}>25</MenuItem>
+                  <MenuItem value={50}>50</MenuItem>
+                  <MenuItem value={100}>100</MenuItem>
+                  <MenuItem value={500}>500</MenuItem>
+                  <MenuItem value={-1}>All ({totalRecords})</MenuItem>
+                </Select>
               </Box>
-            )}
+
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
+                {pageSize === -1 ? 'all rows' : `${startEntry}-${endEntry} of ${totalRecords}`}
+              </Typography>
+
+              {pageSize !== -1 && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <IconButton
+                    size="small"
+                    disabled={page === 1 || isAllRows}
+                    onClick={() => setPage(1)}
+                    sx={{ p: 0.4 }}
+                  >
+                    <FirstPage fontSize="small" />
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    disabled={page === 1 || isAllRows}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    sx={{ p: 0.4 }}
+                  >
+                    <ChevronLeft fontSize="small" />
+                  </IconButton>
+                  <Typography variant="caption" sx={{ fontFamily: 'monospace', px: 0.5, fontWeight: 600 }}>
+                    {page}/{totalPages || 1}
+                  </Typography>
+                  <IconButton
+                    size="small"
+                    disabled={page >= totalPages || isAllRows}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    sx={{ p: 0.4 }}
+                  >
+                    <ChevronRight fontSize="small" />
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    disabled={page >= totalPages || isAllRows}
+                    onClick={() => setPage(totalPages)}
+                    sx={{ p: 0.4 }}
+                  >
+                    <LastPage fontSize="small" />
+                  </IconButton>
+                </Box>
+              )}
+            </Box>
           </Box>
-        </Box>
+        )}
       </Paper>
 
       {/* Quick Add Column Modal */}
