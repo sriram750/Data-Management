@@ -20,13 +20,19 @@ async def get_client_info(request: Request) -> Tuple[Optional[str], Optional[str
 
 
 async def get_current_user_and_session(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> Tuple[User, UserSession]:
-    if not credentials or not credentials.credentials:
+    token = credentials.credentials if credentials and credentials.credentials else None
+    if not token:
+        token = request.query_params.get("token")
+    if not token:
+        token = request.cookies.get("auth_token")
+
+    if not token:
         raise UnauthorizedException("Authentication token required.")
 
-    token = credentials.credentials
     user, session = await auth_service.get_user_by_session_token(db, token)
     return user, session
 

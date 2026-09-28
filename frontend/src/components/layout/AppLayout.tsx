@@ -44,6 +44,7 @@ import {
   ExpandLess,
   ExpandMore,
   TableView,
+  DescriptionOutlined,
 } from '@mui/icons-material';
 
 import { useAuth } from '../../context/AuthContext';
@@ -134,6 +135,18 @@ export const AppLayout: React.FC = () => {
               <DashboardOutlined fontSize="small" />
             </ListItemIcon>
             <ListItemText primary={<Typography sx={{ fontWeight: 500, fontSize: '0.9rem' }}>Dashboard</Typography>} />
+          </ListItemButton>
+
+          {/* Documents Hub */}
+          <ListItemButton
+            selected={isCurrent('/documents')}
+            onClick={() => navigate('/documents')}
+            sx={{ borderRadius: 2, mb: 0.5 }}
+          >
+            <ListItemIcon sx={{ minWidth: 38, color: isCurrent('/documents') ? 'primary.main' : 'inherit' }}>
+              <DescriptionOutlined fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={<Typography sx={{ fontWeight: 500, fontSize: '0.9rem' }}>Documents</Typography>} />
           </ListItemButton>
 
           {/* Tables Section */}

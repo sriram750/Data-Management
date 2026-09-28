@@ -322,3 +322,47 @@ export interface DashboardMetrics {
   exports_today: number;
   recent_activities: RecentActivityItem[];
 }
+
+export interface AttachmentVersionItem {
+  id: string;
+  version_number: number;
+  file_size_bytes: number;
+  sha256_hash: string;
+  change_summary?: string | null;
+  created_at: string;
+  created_by_username?: string | null;
+}
+
+export interface DocumentItem {
+  id: string;
+  original_filename: string;
+  file_size_bytes: number;
+  content_type: string;
+  sha256_hash: string;
+  version: number;
+  is_deleted?: boolean;
+  deleted_at?: string | null;
+  deleted_by_username?: string | null;
+  table_id?: string | null;
+  record_id?: string | null;
+  column_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  uploaded_by_username?: string | null;
+  versions: AttachmentVersionItem[];
+}
+
+export interface DocumentListResponse {
+  items: DocumentItem[];
+  total: number;
+}
+
+export interface DocumentAuditLogItem {
+  id: string;
+  timestamp: string;
+  action: string;
+  username: string;
+  filename?: string | null;
+  details?: Record<string, any> | null;
+  ip_address?: string | null;
+}

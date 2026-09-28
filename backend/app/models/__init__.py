@@ -17,7 +17,7 @@ from app.models.record_version import RecordVersion, ChangeType
 from app.models.audit_log import AuditLog, AuditAction
 from app.models.table_history import TableHistory
 from app.models.import_export import ImportHistory, ExportHistory, ImportStatus, ExportFormat
-from app.models.file_attachment import FileAttachment
+from app.models.file_attachment import FileAttachment, AttachmentVersion
 from app.models.saved_view import SavedView
 
 __all__ = [
@@ -51,5 +51,6 @@ __all__ = [
     "ImportStatus",
     "ExportFormat",
     "FileAttachment",
+    "AttachmentVersion",
     "SavedView",
 ]

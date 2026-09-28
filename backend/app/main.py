@@ -37,6 +37,63 @@ def _ensure_schema_migrations(connection):
                     connection.execute(text("ALTER TABLE data_tables ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT 0"))
                 if "password_hash" not in existing_cols:
                     connection.execute(text("ALTER TABLE data_tables ADD COLUMN password_hash VARCHAR(255) NULL"))
+
+            # file_attachments migration
+            res_att = connection.execute(text("PRAGMA table_info(file_attachments)"))
+            att_info = {row[1]: row for row in res_att.fetchall()}
+            if att_info:
+                if "version" not in att_info:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))
+                if "table_id" in att_info and att_info["table_id"][3] == 1:
+                    connection.execute(text("PRAGMA foreign_keys = OFF;"))
+                    connection.execute(text("""
+                        CREATE TABLE file_attachments_new (
+                            id CHAR(36) PRIMARY KEY,
+                            table_id CHAR(36),
+                            record_id CHAR(36),
+                            column_id CHAR(36),
+                            original_filename VARCHAR(255) NOT NULL,
+                            stored_filename VARCHAR(255) NOT NULL UNIQUE,
+                            file_size_bytes BIGINT NOT NULL,
+                            content_type VARCHAR(128) NOT NULL,
+                            sha256_hash VARCHAR(64) NOT NULL,
+                            version INTEGER NOT NULL DEFAULT 1,
+                            uploaded_by_id CHAR(36),
+                            created_at DATETIME NOT NULL,
+                            updated_at DATETIME NOT NULL,
+                            FOREIGN KEY(table_id) REFERENCES data_tables(id) ON DELETE CASCADE,
+                            FOREIGN KEY(record_id) REFERENCES data_records(id) ON DELETE CASCADE,
+                            FOREIGN KEY(column_id) REFERENCES data_columns(id) ON DELETE CASCADE,
+                            FOREIGN KEY(uploaded_by_id) REFERENCES users(id) ON DELETE SET NULL
+                        );
+                    """))
+                    connection.execute(text("""
+                        INSERT INTO file_attachments_new (
+                            id, table_id, record_id, column_id, original_filename, stored_filename,
+                            file_size_bytes, content_type, sha256_hash, version, uploaded_by_id, created_at, updated_at
+                        )
+                        SELECT
+                            id, table_id, record_id, column_id, original_filename, stored_filename,
+                            file_size_bytes, content_type, sha256_hash, version, uploaded_by_id, created_at, updated_at
+                        FROM file_attachments;
+                    """))
+                    connection.execute(text("DROP TABLE file_attachments;"))
+                    connection.execute(text("ALTER TABLE file_attachments_new RENAME TO file_attachments;"))
+                    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_file_attachments_table_id ON file_attachments(table_id);"))
+                    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_file_attachments_record_id ON file_attachments(record_id);"))
+                    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_file_attachments_column_id ON file_attachments(column_id);"))
+                    connection.execute(text("PRAGMA foreign_keys = ON;"))
+
+            res_att_info = connection.execute(text("PRAGMA table_info(file_attachments)"))
+            att_cols_sqlite = {row[1] for row in res_att_info.fetchall()}
+            if att_cols_sqlite:
+                if "is_deleted" not in att_cols_sqlite:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0"))
+                if "deleted_at" not in att_cols_sqlite:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_at DATETIME NULL"))
+                if "deleted_by_id" not in att_cols_sqlite:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_by_id CHAR(36) NULL"))
+
         elif connection.dialect.name == "postgresql":
             res = connection.execute(text(
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'data_tables'"
@@ -49,6 +106,22 @@ def _ensure_schema_migrations(connection):
                     connection.execute(text("ALTER TABLE data_tables ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT FALSE"))
                 if "password_hash" not in existing_cols:
                     connection.execute(text("ALTER TABLE data_tables ADD COLUMN password_hash VARCHAR(255) NULL"))
+
+            # file_attachments migration
+            res_att = connection.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'file_attachments'"
+            ))
+            att_cols = {row[0] for row in res_att.fetchall()}
+            if att_cols:
+                if "version" not in att_cols:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))
+                if "is_deleted" not in att_cols:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE"))
+                if "deleted_at" not in att_cols:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE NULL"))
+                if "deleted_by_id" not in att_cols:
+                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_by_id CHAR(36) NULL"))
+                connection.execute(text("ALTER TABLE file_attachments ALTER COLUMN table_id DROP NOT NULL"))
     except Exception as e:
         logger.warning(f"Schema migration check notice: {e}")
 

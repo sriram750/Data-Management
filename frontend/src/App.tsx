@@ -21,6 +21,7 @@ import { SessionsPage } from './features/security/SessionsPage';
 import { AuditLogsPage } from './features/audit/AuditLogsPage';
 import { SensitiveAccessLogsPage } from './features/audit/SensitiveAccessLogsPage';
 import { SystemSettingsPage } from './features/settings/SystemSettingsPage';
+import { DocumentsPage } from './features/documents/DocumentsPage';
 
 // Protected Route Wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -66,6 +67,7 @@ export const App: React.FC = () => {
             >
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
+              <Route path="documents" element={<DocumentsPage />} />
               <Route path="tables" element={<TableListPage />} />
               <Route path="tables/create" element={<TableBuilderPage />} />
               <Route path="tables/:tableId" element={<DynamicGridPage />} />

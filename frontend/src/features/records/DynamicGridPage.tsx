@@ -26,6 +26,8 @@ import {
   Snackbar,
   Switch,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -54,6 +56,7 @@ import {
   FitScreen,
   Fullscreen,
   FullscreenExit,
+  History,
   KeyOutlined,
   LastPage,
   LockOutlined,
@@ -74,6 +77,8 @@ import {
   Visibility,
   VisibilityOff,
   VisibilityOutlined,
+  PictureAsPdf,
+  DescriptionOutlined,
 } from '@mui/icons-material';
 
 import { AgGridReact } from 'ag-grid-react';
@@ -96,13 +101,14 @@ import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { apiClient } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useThemeMode } from '../../context/ThemeContext';
-import { ColumnType, DataRecord, DataTable } from '../../types';
+import { ColumnType, DataRecord, DataTable, DeletedRecordItem } from '../../types';
 import RecordDrawer from './RecordDrawer';
 import RecordHistoryModal from './RecordHistoryModal';
 import DeletedRecordsModal from './DeletedRecordsModal';
 import TableSettingsModal from '../tables/TableSettingsModal';
 import TablePermissionsModal from '../tables/TablePermissionsModal';
 import ExportModal from '../exports/ExportModal';
+import { DocumentStudioModal } from '../documents/DocumentStudioModal';
 
 type DensityMode = 'compact' | 'standard' | 'comfortable';
 
@@ -188,6 +194,8 @@ export const DynamicGridPage: React.FC = () => {
   const [deleteSingleRecordId, setDeleteSingleRecordId] = useState<string | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
   const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null);
+  const [studioDocId, setStudioDocId] = useState<string | null>(null);
+  const [studioModalOpen, setStudioModalOpen] = useState<boolean>(false);
 
   // Cell Edit Undo/Redo Stacks
   const [undoStack, setUndoStack] = useState<
@@ -203,6 +211,14 @@ export const DynamicGridPage: React.FC = () => {
   const [promptShowPassword, setPromptShowPassword] = useState(false);
   const [promptError, setPromptError] = useState<string | null>(null);
   const [promptUnlocking, setPromptUnlocking] = useState(false);
+
+  // Active Grid View: 'active' (default), 'trash' (Recycle Bin), 'logs' (Deletion & Audit Logs)
+  const [activeGridView, setActiveGridView] = useState<'active' | 'trash' | 'logs'>('active');
+  const [trashRecords, setTrashRecords] = useState<DeletedRecordItem[]>([]);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [tableAuditLogs, setTableAuditLogs] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [selectedTrashRows, setSelectedTrashRows] = useState<DeletedRecordItem[]>([]);
 
   const fetchTableAndRecords = async () => {
     if (!tableId) return;
@@ -243,6 +259,8 @@ export const DynamicGridPage: React.FC = () => {
       setRecords(rRes.data.items);
       setTotalRecords(rRes.data.total);
       setTableLockedPrompt(false);
+      // Also fetch deleted records in background
+      fetchDeletedRecords();
     } catch (err: any) {
       if (err.response?.status === 403 && (err.response?.data?.detail?.includes('TABLE_LOCKED') || err.response?.data?.detail?.includes('locked'))) {
         setTableLockedPrompt(true);
@@ -251,6 +269,88 @@ export const DynamicGridPage: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchDeletedRecords = async () => {
+    if (!tableId) return;
+    setTrashLoading(true);
+    try {
+      const res = await apiClient.get<DeletedRecordItem[]>(`/tables/${tableId}/deleted-records`);
+      setTrashRecords(res.data);
+    } catch (err: any) {
+      console.error('Failed to load deleted records:', err);
+    } finally {
+      setTrashLoading(false);
+    }
+  };
+
+  const fetchTableAuditLogs = async () => {
+    if (!tableId) return;
+    setAuditLoading(true);
+    try {
+      const res = await apiClient.get<any>('/audit/logs', {
+        params: { table_id: tableId, page_size: 200 },
+      });
+      setTableAuditLogs(res.data?.items || []);
+    } catch (err: any) {
+      console.error('Failed to load table audit logs:', err);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleRestoreRecord = async (recordId: string) => {
+    if (!tableId) return;
+    try {
+      await apiClient.post(`/tables/${tableId}/records/${recordId}/restore-deleted`, {});
+      setSnackbarMessage('Record restored to active grid successfully.');
+      fetchTableAndRecords();
+      fetchDeletedRecords();
+    } catch (err: any) {
+      setSnackbarMessage(`Restore failed: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handlePermanentDeleteRecord = async (recordId: string) => {
+    if (!tableId) return;
+    if (!window.confirm('Permanently erase this record? This action CANNOT be undone.')) return;
+    try {
+      await apiClient.delete(`/tables/${tableId}/records/${recordId}/permanent`);
+      setSnackbarMessage('Record permanently deleted.');
+      fetchDeletedRecords();
+    } catch (err: any) {
+      setSnackbarMessage(`Delete failed: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handleBulkRestoreTrash = async () => {
+    if (!tableId || !selectedTrashRows.length) return;
+    try {
+      for (const r of selectedTrashRows) {
+        await apiClient.post(`/tables/${tableId}/records/${r.record_id || r.id}/restore-deleted`, {});
+      }
+      setSnackbarMessage(`Restored ${selectedTrashRows.length} records successfully.`);
+      setSelectedTrashRows([]);
+      fetchTableAndRecords();
+      fetchDeletedRecords();
+    } catch (err: any) {
+      setSnackbarMessage(`Bulk restore failed: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const handleBulkPermanentDeleteTrash = async () => {
+    if (!tableId || !selectedTrashRows.length) return;
+    if (!window.confirm(`Permanently erase ${selectedTrashRows.length} records? This action CANNOT be undone.`)) return;
+    try {
+      for (const r of selectedTrashRows) {
+        await apiClient.delete(`/tables/${tableId}/records/${r.record_id || r.id}/permanent`);
+      }
+      setSnackbarMessage(`Permanently deleted ${selectedTrashRows.length} records.`);
+      setSelectedTrashRows([]);
+      fetchDeletedRecords();
+    } catch (err: any) {
+      setSnackbarMessage(`Bulk permanent delete failed: ${err.response?.data?.detail || err.message}`);
     }
   };
 
@@ -659,6 +759,32 @@ export const DynamicGridPage: React.FC = () => {
       });
     }
 
+    // Active Status Badge Column matching reference design
+    defs.push({
+      colId: '__status__',
+      headerName: 'Status',
+      width: 90,
+      minWidth: 85,
+      maxWidth: 98,
+      pinned: 'left',
+      sortable: false,
+      filter: false,
+      resizable: false,
+      cellRenderer: () => (
+        <Chip
+          label="Active"
+          size="small"
+          sx={{
+            bgcolor: 'rgba(16, 185, 129, 0.12)',
+            color: '#10B981',
+            fontWeight: 700,
+            fontSize: '0.7rem',
+            height: 20,
+          }}
+        />
+      ),
+    });
+
     // Dynamic Columns from Table Schema (Starts directly with Circuit/first column matching reference design)
     table.columns.forEach((col) => {
       const isHidden = Boolean(hiddenColumns[col.name]);
@@ -818,6 +944,61 @@ export const DynamicGridPage: React.FC = () => {
                   <ContentCopy sx={{ fontSize: 15 }} />
                 </IconButton>
               </Tooltip>
+            </Box>
+          );
+        };
+      }
+      // File / Document Attachment column rendering
+      else if (col.data_type === 'FILE') {
+        colDef.minWidth = 160;
+        colDef.cellRenderer = (params: any) => {
+          if (!params.value) return <Typography variant="caption" sx={{ color: 'text.disabled' }}>-</Typography>;
+          const fileInfo = typeof params.value === 'object' ? params.value : { filename: String(params.value) };
+          const fname = fileInfo.filename || '';
+          const isPdf = fname.toLowerCase().endsWith('.pdf');
+          const isWord = fname.toLowerCase().endsWith('.docx') || fname.toLowerCase().endsWith('.doc');
+
+          return (
+            <Box
+              sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.8,
+                color: isPdf ? '#EF4444' : isWord ? '#3B82F6' : 'primary.main',
+                cursor: fileInfo.id ? 'pointer' : 'default',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '100%',
+                bgcolor: mode === 'dark' ? 'rgba(255,255,255,0.06)' : '#F1F5F9',
+                px: 1,
+                py: 0.3,
+                borderRadius: 1.5,
+                border: '1px solid',
+                borderColor: mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#E2E8F0',
+                '&:hover': fileInfo.id ? { bgcolor: mode === 'dark' ? 'rgba(255,255,255,0.1)' : '#E2E8F0' } : {},
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (fileInfo.id) {
+                  setStudioDocId(fileInfo.id);
+                  setStudioModalOpen(true);
+                }
+              }}
+              title={fileInfo.id ? 'Click to open in DataMatrix Document Studio' : fname}
+            >
+              {isPdf ? (
+                <PictureAsPdf sx={{ fontSize: 16 }} />
+              ) : isWord ? (
+                <DescriptionOutlined sx={{ fontSize: 16 }} />
+              ) : (
+                <OpenInNew sx={{ fontSize: 14 }} />
+              )}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {fname || 'View Document'}
+              </span>
             </Box>
           );
         };
@@ -1148,6 +1329,199 @@ export const DynamicGridPage: React.FC = () => {
     return defs;
   }, [table, revealedSecrets, mode, page, pageSize, hiddenColumns]);
 
+  // Trash AG Grid Column Definitions
+  const trashColumnDefs: ColDef[] = useMemo(() => {
+    if (!table) return [];
+
+    const defs: ColDef[] = [
+      {
+        field: 'id',
+        headerName: '',
+        checkboxSelection: true,
+        headerCheckboxSelection: true,
+        width: 48,
+        minWidth: 48,
+        maxWidth: 52,
+        pinned: 'left',
+        sortable: false,
+        filter: false,
+      },
+      {
+        headerName: 'Status',
+        width: 105,
+        pinned: 'left',
+        cellRenderer: () => (
+          <Chip
+            label="In Trash"
+            size="small"
+            sx={{
+              bgcolor: 'rgba(239, 68, 68, 0.12)',
+              color: '#EF4444',
+              fontWeight: 700,
+              fontSize: '0.72rem',
+              height: 22,
+            }}
+          />
+        ),
+      },
+    ];
+
+    // Dynamic columns from data_snapshot
+    table.columns.forEach((col) => {
+      defs.push({
+        colId: `data_snapshot.${col.name}`,
+        headerName: col.display_name,
+        valueGetter: (params) => {
+          const snap = params.data?.data_snapshot;
+          if (!snap) return '';
+          return snap[col.name] !== undefined ? snap[col.name] : '';
+        },
+        sortable: true,
+        filter: true,
+        resizable: true,
+        minWidth: 100,
+      });
+    });
+
+    // Metadata columns
+    defs.push(
+      {
+        field: 'deleted_at',
+        headerName: 'Deleted At',
+        width: 170,
+        sortable: true,
+        filter: true,
+        valueFormatter: (params) =>
+          params.value
+            ? new Date(params.value).toLocaleDateString() + ' ' + new Date(params.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '',
+      },
+      {
+        field: 'deleted_by_name',
+        headerName: 'Deleted By',
+        width: 140,
+        sortable: true,
+        filter: true,
+        valueGetter: (params) => params.data?.deleted_by_name || 'Admin',
+      },
+      {
+        colId: 'actions',
+        headerName: 'Actions',
+        width: 170,
+        pinned: 'right',
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: any) => {
+          if (!params.data) return null;
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Tooltip title="Restore back to active grid">
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="primary"
+                  startIcon={<RestoreFromTrashOutlined />}
+                  onClick={() => handleRestoreRecord(params.data.record_id || params.data.id)}
+                  sx={{ py: 0.2, px: 1, fontSize: '0.75rem', textTransform: 'none', fontWeight: 600 }}
+                >
+                  Restore
+                </Button>
+              </Tooltip>
+              <Tooltip title="Permanently Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => handlePermanentDeleteRecord(params.data.record_id || params.data.id)}
+                >
+                  <DeleteForeverOutlined fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          );
+        },
+      }
+    );
+
+    return defs;
+  }, [table]);
+
+  // Deletion & Change Audit Log Column Definitions
+  const tableAuditColDefs: ColDef[] = useMemo(
+    () => [
+      {
+        field: 'timestamp',
+        headerName: 'Timestamp',
+        width: 180,
+        sortable: true,
+        filter: true,
+        valueFormatter: (params) =>
+          params.value
+            ? new Date(params.value).toLocaleDateString() + ' ' + new Date(params.value).toLocaleTimeString()
+            : '',
+      },
+      {
+        field: 'action',
+        headerName: 'Action',
+        width: 130,
+        sortable: true,
+        filter: true,
+        cellRenderer: (params: any) => {
+          const act = params.value || '';
+          let color: 'error' | 'success' | 'info' | 'warning' | 'default' = 'default';
+          if (act.includes('DELETE')) color = 'error';
+          else if (act.includes('CREATE')) color = 'success';
+          else if (act.includes('UPDATE')) color = 'info';
+          else if (act.includes('RESTORE')) color = 'warning';
+
+          return (
+            <Chip
+              label={act}
+              size="small"
+              color={color}
+              sx={{ fontWeight: 700, fontSize: '0.72rem', height: 22 }}
+            />
+          );
+        },
+      },
+      {
+        field: 'username',
+        headerName: 'User',
+        width: 140,
+        sortable: true,
+        filter: true,
+      },
+      {
+        field: 'record_id',
+        headerName: 'Record ID',
+        width: 130,
+        valueFormatter: (params) => (params.value ? String(params.value).substring(0, 8) + '...' : '-'),
+      },
+      {
+        field: 'field_name',
+        headerName: 'Field Name',
+        width: 140,
+        sortable: true,
+        filter: true,
+      },
+      {
+        field: 'old_value',
+        headerName: 'Old Value',
+        width: 160,
+      },
+      {
+        field: 'new_value',
+        headerName: 'New Value',
+        width: 160,
+      },
+      {
+        field: 'ip_address',
+        headerName: 'IP Address',
+        width: 130,
+      },
+    ],
+    []
+  );
+
   const onGridReady = (params: GridReadyEvent) => {
     setGridApi(params.api);
   };
@@ -1375,6 +1749,45 @@ export const DynamicGridPage: React.FC = () => {
           </Box>
         </Box>
 
+        {/* Active, Trash, and Deletion Log View Switcher */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ToggleButtonGroup
+            value={activeGridView}
+            exclusive
+            onChange={(_, val) => {
+              if (val) {
+                setActiveGridView(val);
+                if (val === 'trash') fetchDeletedRecords();
+                if (val === 'logs') fetchTableAuditLogs();
+              }
+            }}
+            size="small"
+            sx={{
+              bgcolor: mode === 'dark' ? 'rgba(255,255,255,0.05)' : '#F1F5F9',
+              borderRadius: 2,
+            }}
+          >
+            <ToggleButton value="active" sx={{ textTransform: 'none', px: 2, fontWeight: 700, fontSize: '0.8rem' }}>
+              Active Records ({totalRecords})
+            </ToggleButton>
+            <ToggleButton
+              value="trash"
+              sx={{
+                textTransform: 'none',
+                px: 2,
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                color: trashRecords.length > 0 ? '#F97316 !important' : undefined,
+              }}
+            >
+              Recycle Bin ({trashRecords.length})
+            </ToggleButton>
+            <ToggleButton value="logs" sx={{ textTransform: 'none', px: 2, fontWeight: 700, fontSize: '0.8rem' }}>
+              Deletion & Audit Log
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
         {/* Action Controls & AG Grid Features */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           {/* Quick Search */}
@@ -1588,7 +2001,11 @@ export const DynamicGridPage: React.FC = () => {
           <Tooltip title="View Table Recycle Bin (Deleted Records)">
             <IconButton
               size="small"
-              onClick={() => setIsDeletedRecordsOpen(true)}
+              onClick={() => {
+                setActiveGridView('trash');
+                fetchDeletedRecords();
+              }}
+              color={activeGridView === 'trash' ? 'warning' : 'default'}
               sx={{
                 border: '1px solid',
                 borderColor: 'divider',
@@ -1637,7 +2054,7 @@ export const DynamicGridPage: React.FC = () => {
       </Box>
 
       {/* Selected Rows Floating Action Banner */}
-      {selectedRows.length > 0 && (
+      {activeGridView === 'active' && selectedRows.length > 0 && (
         <Paper
           elevation={3}
           sx={{
@@ -1686,6 +2103,56 @@ export const DynamicGridPage: React.FC = () => {
                 setSelectedRows([]);
               }}
             >
+              Deselect All
+            </Button>
+          </Box>
+        </Paper>
+      )}
+
+      {/* Selected Trash Rows Floating Action Banner */}
+      {activeGridView === 'trash' && selectedTrashRows.length > 0 && (
+        <Paper
+          elevation={3}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            px: 2,
+            py: 1,
+            mb: 1.5,
+            borderRadius: 2,
+            bgcolor: mode === 'dark' ? '#1E293B' : '#EEF2FF',
+            border: '1px solid',
+            borderColor: mode === 'dark' ? 'primary.dark' : 'primary.light',
+            animation: 'fadeIn 0.2s ease-in-out',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <CheckCircleOutlined color="primary" fontSize="small" />
+            <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
+              {selectedTrashRows.length} deleted record{selectedTrashRows.length > 1 ? 's' : ''} selected
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Button
+              size="small"
+              variant="contained"
+              color="primary"
+              startIcon={<RestoreFromTrashOutlined />}
+              onClick={handleBulkRestoreTrash}
+            >
+              Restore Selected ({selectedTrashRows.length})
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteForeverOutlined />}
+              onClick={handleBulkPermanentDeleteTrash}
+            >
+              Permanently Delete ({selectedTrashRows.length})
+            </Button>
+            <Button size="small" onClick={() => setSelectedTrashRows([])}>
               Deselect All
             </Button>
           </Box>
@@ -1980,20 +2447,52 @@ export const DynamicGridPage: React.FC = () => {
                 },
               }}
             >
-              <AgGridReact
-                rowData={records}
-                columnDefs={columnDefs}
-                defaultColDef={defaultColDef}
-                rowSelection="multiple"
-                rowHeight={densityHeights.row}
-                headerHeight={densityHeights.header}
-                animateRows={true}
-                enableCellTextSelection={true}
-                onGridReady={onGridReady}
-                onSelectionChanged={onSelectionChanged}
-                onRowDoubleClicked={onRowDoubleClicked}
-                onCellValueChanged={handleCellValueChanged}
-              />
+              {activeGridView === 'active' && (
+                <AgGridReact
+                  rowData={records}
+                  columnDefs={columnDefs}
+                  defaultColDef={defaultColDef}
+                  rowSelection="multiple"
+                  rowHeight={densityHeights.row}
+                  headerHeight={densityHeights.header}
+                  animateRows={true}
+                  enableCellTextSelection={true}
+                  onGridReady={onGridReady}
+                  onSelectionChanged={onSelectionChanged}
+                  onRowDoubleClicked={onRowDoubleClicked}
+                  onCellValueChanged={handleCellValueChanged}
+                />
+              )}
+
+              {activeGridView === 'trash' && (
+                <AgGridReact
+                  rowData={trashRecords}
+                  columnDefs={trashColumnDefs}
+                  defaultColDef={defaultColDef}
+                  rowSelection="multiple"
+                  rowHeight={densityHeights.row}
+                  headerHeight={densityHeights.header}
+                  animateRows={true}
+                  enableCellTextSelection={true}
+                  onSelectionChanged={(e) => setSelectedTrashRows(e.api.getSelectedRows())}
+                  pagination={true}
+                  paginationPageSize={50}
+                />
+              )}
+
+              {activeGridView === 'logs' && (
+                <AgGridReact
+                  rowData={tableAuditLogs}
+                  columnDefs={tableAuditColDefs}
+                  defaultColDef={defaultColDef}
+                  rowHeight={densityHeights.row}
+                  headerHeight={densityHeights.header}
+                  animateRows={true}
+                  enableCellTextSelection={true}
+                  pagination={true}
+                  paginationPageSize={50}
+                />
+              )}
             </Box>
 
             {/* Right Scrollbar Rail with Up/Down Arrow Indicators matching reference */}
@@ -2392,6 +2891,13 @@ export const DynamicGridPage: React.FC = () => {
           {snackbarMessage}
         </Alert>
       </Snackbar>
+      {/* Document Studio Fullscreen Modal */}
+      <DocumentStudioModal
+        open={studioModalOpen}
+        documentId={studioDocId}
+        onClose={() => setStudioModalOpen(false)}
+        onDocumentUpdated={fetchTableAndRecords}
+      />
     </Box>
   );
 };
