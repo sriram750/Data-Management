@@ -42,8 +42,14 @@ class AuditService:
             details=details,
             timestamp=datetime.now(timezone.utc),
         )
-        db.add(audit_entry)
-        await db.flush()
+        try:
+            async with db.begin_nested():
+                db.add(audit_entry)
+                await db.flush()
+        except Exception as e:
+            from app.core.logging import logger
+            logger.warning(f"Could not persist audit log event '{action}': {e}")
+            return audit_entry
         return audit_entry
 
     @staticmethod

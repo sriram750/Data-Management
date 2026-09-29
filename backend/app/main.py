@@ -107,25 +107,6 @@ def _ensure_schema_migrations(connection):
                 if "password_hash" not in existing_cols:
                     connection.execute(text("ALTER TABLE data_tables ADD COLUMN password_hash VARCHAR(255) NULL"))
 
-            # auditaction enum migration for new document actions
-            try:
-                res_type = connection.execute(text("SELECT oid FROM pg_type WHERE typname = 'auditaction'"))
-                type_row = res_type.fetchone()
-                if type_row:
-                    res_enum = connection.execute(
-                        text("SELECT enumlabel FROM pg_enum WHERE enumtypid = :oid"),
-                        {"oid": type_row[0]}
-                    )
-                    existing_enums = {row[0] for row in res_enum.fetchall()}
-                    for action_val in ("DOCUMENT_VIEWED", "DOCUMENT_EDITED", "DOCUMENT_REVERTED", "DOCUMENT_DELETED"):
-                        if action_val not in existing_enums:
-                            try:
-                                connection.execute(text(f"ALTER TYPE auditaction ADD VALUE '{action_val}'"))
-                            except Exception as enum_err:
-                                logger.warning(f"Could not add enum value {action_val} to auditaction: {enum_err}")
-            except Exception as e:
-                logger.warning(f"Audit action enum check notice: {e}")
-
             # file_attachments migration
             try:
                 res_att = connection.execute(text(
@@ -153,6 +134,28 @@ def _ensure_schema_migrations(connection):
             except Exception as e:
                 logger.warning(f"File attachments migration notice: {e}")
 
+            # attachment_versions table migration
+            try:
+                res_ver = connection.execute(text("SELECT to_regclass('attachment_versions')"))
+                if not res_ver.scalar():
+                    connection.execute(text("""
+                        CREATE TABLE IF NOT EXISTS attachment_versions (
+                            id UUID PRIMARY KEY,
+                            attachment_id UUID NOT NULL REFERENCES file_attachments(id) ON DELETE CASCADE,
+                            version_number INTEGER NOT NULL,
+                            stored_filename VARCHAR(255) NOT NULL,
+                            file_size_bytes BIGINT NOT NULL,
+                            sha256_hash VARCHAR(64) NOT NULL,
+                            change_summary VARCHAR(255) NULL,
+                            created_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                            updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+                        )
+                    """))
+                    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_attachment_versions_attachment_id ON attachment_versions(attachment_id)"))
+            except Exception as e:
+                logger.warning(f"Attachment versions table migration notice: {e}")
+
         # Ensure all columns have non-empty display_name and name
         try:
             connection.execute(text("UPDATE data_columns SET display_name = name WHERE display_name = '' OR display_name IS NULL"))
@@ -166,8 +169,33 @@ def _ensure_schema_migrations(connection):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from sqlalchemy import text
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}...")
-    # Initialize database tables
+
+    # 1. PostgreSQL Enum Migration outside transaction block (PostgreSQL forbids ALTER TYPE ADD VALUE in transaction)
+    try:
+        async with async_engine.connect() as conn:
+            if conn.dialect.name == "postgresql":
+                await conn.execution_options(isolation_level="AUTOCOMMIT")
+                res_type = await conn.execute(text("SELECT oid FROM pg_type WHERE typname = 'auditaction'"))
+                type_row = res_type.fetchone()
+                if type_row:
+                    res_enum = await conn.execute(
+                        text("SELECT enumlabel FROM pg_enum WHERE enumtypid = :oid"),
+                        {"oid": type_row[0]}
+                    )
+                    existing_enums = {row[0] for row in res_enum.fetchall()}
+                    for action_val in ("DOCUMENT_VIEWED", "DOCUMENT_EDITED", "DOCUMENT_REVERTED", "DOCUMENT_DELETED"):
+                        if action_val not in existing_enums:
+                            try:
+                                await conn.execute(text(f"ALTER TYPE auditaction ADD VALUE '{action_val}'"))
+                                logger.info(f"Successfully added '{action_val}' to PostgreSQL auditaction enum.")
+                            except Exception as enum_err:
+                                logger.warning(f"Notice adding enum value {action_val}: {enum_err}")
+    except Exception as e:
+        logger.warning(f"PostgreSQL enum migration notice: {e}")
+
+    # 2. Initialize database tables and schema migrations
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_schema_migrations)

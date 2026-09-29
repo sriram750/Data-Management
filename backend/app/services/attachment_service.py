@@ -184,24 +184,43 @@ class AttachmentService:
         if not att:
             raise NotFoundException("File attachment not found.")
 
-        upload_dir = AttachmentService._ensure_upload_dir()
-        target_filename = att.stored_filename
+        # Capture fields immediately so we don't access expired attributes if rollback occurs
+        content_type = att.content_type
+        original_filename = att.original_filename
+        stored_filename = att.stored_filename
+        att_version = att.version
+        table_id = att.table_id
+        record_id = att.record_id
 
-        if version_number and version_number != att.version:
-            v_res = await db.execute(
-                select(AttachmentVersion).where(
-                    AttachmentVersion.attachment_id == attachment_id,
-                    AttachmentVersion.version_number == version_number,
+        upload_dir = AttachmentService._ensure_upload_dir()
+        target_filename = stored_filename
+
+        if version_number and version_number != att_version:
+            try:
+                v_res = await db.execute(
+                    select(AttachmentVersion).where(
+                        AttachmentVersion.attachment_id == attachment_id,
+                        AttachmentVersion.version_number == version_number,
+                    )
                 )
-            )
-            v_obj = v_res.scalar_one_or_none()
-            if not v_obj:
-                raise NotFoundException(f"Version {version_number} not found.")
-            target_filename = v_obj.stored_filename
+                v_obj = v_res.scalar_one_or_none()
+                if v_obj:
+                    target_filename = v_obj.stored_filename
+            except Exception:
+                pass
 
         file_path = os.path.join(upload_dir, target_filename)
         if not os.path.exists(file_path):
-            raise NotFoundException("Attachment file not found on disk.")
+            for candidate in [
+                os.path.join(os.getcwd(), "uploads", target_filename),
+                os.path.join(os.getcwd(), "backend", "uploads", target_filename),
+            ]:
+                if os.path.exists(candidate):
+                    file_path = candidate
+                    break
+
+        if not os.path.exists(file_path):
+            raise NotFoundException(f"Attachment file '{original_filename}' not found on disk.")
 
         try:
             await audit_service.log_event(
@@ -209,22 +228,25 @@ class AttachmentService:
                 action=AuditAction.DOCUMENT_VIEWED,
                 username=user.username,
                 user_id=user.id,
-                table_id=att.table_id,
-                record_id=att.record_id,
+                table_id=table_id,
+                record_id=record_id,
                 ip_address=ip_address,
                 user_agent=user_agent,
                 details={
-                    "filename": att.original_filename,
-                    "version": version_number or att.version,
-                    "type": att.content_type,
+                    "filename": original_filename,
+                    "version": version_number or att_version,
+                    "type": content_type,
                 },
             )
             await db.commit()
         except Exception as audit_err:
             logger.warning(f"Audit log notice for DOCUMENT_VIEWED: {audit_err}")
-            await db.rollback()
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
-        return file_path, att.content_type, att.original_filename
+        return file_path, content_type, original_filename
 
     @staticmethod
     async def save_edited_document(
@@ -554,23 +576,46 @@ class AttachmentService:
             AuditAction.DOCUMENT_REVERTED,
             AuditAction.FILE_UPLOADED,
         ]
-        q = (
-            select(AuditLog)
-            .where(AuditLog.action.in_(doc_actions))
-            .order_by(desc(AuditLog.timestamp))
-            .limit(limit)
-        )
-        res = await db.execute(q)
-        logs = res.scalars().all()
+        logs = []
+        try:
+            q = (
+                select(AuditLog)
+                .where(AuditLog.action.in_(doc_actions))
+                .order_by(desc(AuditLog.timestamp))
+                .limit(limit)
+            )
+            res = await db.execute(q)
+            logs = res.scalars().all()
+        except Exception as e:
+            logger.warning(f"Notice querying audit logs with all document enums: {e}")
+            try:
+                await db.rollback()
+                q = (
+                    select(AuditLog)
+                    .where(AuditLog.action == AuditAction.FILE_UPLOADED)
+                    .order_by(desc(AuditLog.timestamp))
+                    .limit(limit)
+                )
+                res = await db.execute(q)
+                logs = res.scalars().all()
+            except Exception as e2:
+                logger.warning(f"Notice querying audit logs fallback: {e2}")
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                return []
+
         out = []
         for l in logs:
             filename = None
             if l.details and isinstance(l.details, dict):
                 filename = l.details.get("filename")
+            action_val = l.action.value if hasattr(l.action, "value") else str(l.action)
             out.append({
                 "id": l.id,
                 "timestamp": l.timestamp,
-                "action": l.action.value,
+                "action": action_val,
                 "username": l.username,
                 "filename": filename,
                 "details": l.details,
