@@ -68,3 +68,8 @@ class TableHistoryResponse(BaseModel):
     changed_by_username: Optional[str] = None
     timestamp: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class BulkTableActionRequest(BaseModel):
+    table_ids: List[UUID] = Field(..., min_length=1)
+

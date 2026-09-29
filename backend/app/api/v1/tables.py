@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.column import ColumnResponse
 from app.schemas.rbac import TablePermissionCreate, TablePermissionResponse
 from app.schemas.table import (
+    BulkTableActionRequest,
     TableCreate,
     TableHistoryResponse,
     TableListResponse,
@@ -99,6 +100,48 @@ async def create_table(
         db=db, req=req, user=current_user, ip_address=ip_address, user_agent=user_agent
     )
     return format_table_response(table, 0)
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_tables(
+    req: BulkTableActionRequest,
+    request: Request,
+    current_user: User = Depends(require_permission("table:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    ip_address, user_agent = await get_client_info(request)
+    deleted_count = await table_service.bulk_delete_tables(
+        db=db, table_ids=req.table_ids, user=current_user, ip_address=ip_address, user_agent=user_agent
+    )
+    return {"message": f"Successfully moved {deleted_count} table(s) to trash", "count": deleted_count}
+
+
+@router.post("/bulk-restore")
+async def bulk_restore_tables(
+    req: BulkTableActionRequest,
+    request: Request,
+    current_user: User = Depends(require_permission("table:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    ip_address, user_agent = await get_client_info(request)
+    restored_count = await table_service.bulk_restore_tables(
+        db=db, table_ids=req.table_ids, user=current_user, ip_address=ip_address, user_agent=user_agent
+    )
+    return {"message": f"Successfully restored {restored_count} table(s)", "count": restored_count}
+
+
+@router.post("/bulk-permanent-delete")
+async def bulk_permanent_delete_tables(
+    req: BulkTableActionRequest,
+    request: Request,
+    current_user: User = Depends(require_permission("table:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    ip_address, user_agent = await get_client_info(request)
+    deleted_count = await table_service.bulk_permanent_delete_tables(
+        db=db, table_ids=req.table_ids, user=current_user, ip_address=ip_address, user_agent=user_agent
+    )
+    return {"message": f"Successfully permanently deleted {deleted_count} table(s)", "count": deleted_count}
 
 
 @router.get("/{table_id}", response_model=TableResponse)

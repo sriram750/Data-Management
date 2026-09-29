@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Card,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -29,6 +30,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   Tabs,
   TextField,
@@ -124,6 +126,17 @@ export const TableListPage: React.FC = () => {
   // Permanent Delete Record Confirm Modal
   const [deleteRecordTarget, setDeleteRecordTarget] = useState<{ tableId: string; recordId: string } | null>(null);
   const [isDeletingRecord, setIsDeletingRecord] = useState(false);
+
+  // Bulk Selection & Deletion State
+  const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
+  const [selectedTrashTableIds, setSelectedTrashTableIds] = useState<string[]>([]);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkPermDeleteDialogOpen, setBulkPermDeleteDialogOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Pagination State
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   // Action status messages
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -399,6 +412,98 @@ export const TableListPage: React.FC = () => {
     }
   };
 
+  // Tab switcher with page and selection reset
+  const handleTabChange = (newTab: number) => {
+    setCurrentTab(newTab);
+    setPage(0);
+    setSelectedTableIds([]);
+    setSelectedTrashTableIds([]);
+  };
+
+  // Bulk Selection Toggles for Active Tables
+  const handleToggleSelectTable = (tableId: string) => {
+    setSelectedTableIds((prev) =>
+      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId]
+    );
+  };
+
+  const handleSelectAllTables = () => {
+    const pageIds = paginatedTables.map((t) => t.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedTableIds.includes(id));
+    if (allPageSelected) {
+      setSelectedTableIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedTableIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  // Bulk Selection Toggles for Trash Tables
+  const handleToggleSelectTrashTable = (tableId: string) => {
+    setSelectedTrashTableIds((prev) =>
+      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId]
+    );
+  };
+
+  const handleSelectAllTrashTables = () => {
+    const pageIds = paginatedTrashTables.map((t) => t.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedTrashTableIds.includes(id));
+    if (allPageSelected) {
+      setSelectedTrashTableIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedTrashTableIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  // Bulk Move to Trash (Soft delete)
+  const handleBulkMoveToTrash = async () => {
+    if (selectedTableIds.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await apiClient.post('/tables/bulk-delete', { table_ids: selectedTableIds });
+      setActionSuccess(res.data?.message || `Successfully moved ${selectedTableIds.length} tables to trash.`);
+      setSelectedTableIds([]);
+      setBulkDeleteDialogOpen(false);
+      await fetchAllData();
+    } catch (err: any) {
+      setActionError(err.response?.data?.detail || 'Failed to move selected tables to trash.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  // Bulk Restore from Trash
+  const handleBulkRestoreTables = async () => {
+    if (selectedTrashTableIds.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await apiClient.post('/tables/bulk-restore', { table_ids: selectedTrashTableIds });
+      setActionSuccess(res.data?.message || `Successfully restored ${selectedTrashTableIds.length} tables.`);
+      setSelectedTrashTableIds([]);
+      await fetchAllData();
+    } catch (err: any) {
+      setActionError(err.response?.data?.detail || 'Failed to restore selected tables.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  // Bulk Permanent Delete
+  const handleBulkPermanentDelete = async () => {
+    if (selectedTrashTableIds.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await apiClient.post('/tables/bulk-permanent-delete', { table_ids: selectedTrashTableIds });
+      setActionSuccess(res.data?.message || `Successfully permanently deleted ${selectedTrashTableIds.length} tables.`);
+      setSelectedTrashTableIds([]);
+      setBulkPermDeleteDialogOpen(false);
+      await fetchAllData();
+    } catch (err: any) {
+      setActionError(err.response?.data?.detail || 'Failed to permanently delete selected tables.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   // Restore deleted record
   const handleRestoreRecord = async (tableId: string, recordId: string) => {
     try {
@@ -512,6 +617,36 @@ export const TableListPage: React.FC = () => {
       return tableName.includes(s) || deletedBy.includes(s) || snapshot.includes(s);
     });
   }, [deletedRecords, search]);
+
+  // Reset page to 0 on search input change
+  useEffect(() => {
+    setPage(0);
+  }, [search]);
+
+  // Paginated slices for all views
+  const paginatedTables = useMemo(() => {
+    const start = page * rowsPerPage;
+    return tables.slice(start, start + rowsPerPage);
+  }, [tables, page, rowsPerPage]);
+
+  const paginatedTrashTables = useMemo(() => {
+    const start = page * rowsPerPage;
+    return trashTables.slice(start, start + rowsPerPage);
+  }, [trashTables, page, rowsPerPage]);
+
+  const paginatedDeletedRecords = useMemo(() => {
+    const start = page * rowsPerPage;
+    return filteredDeletedRecords.slice(start, start + rowsPerPage);
+  }, [filteredDeletedRecords, page, rowsPerPage]);
+
+  // Clamp page if item count shrinks
+  const currentTotal = currentTab === 0 ? tables.length : currentTab === 1 ? trashTables.length : filteredDeletedRecords.length;
+  useEffect(() => {
+    if (page > 0 && page * rowsPerPage >= currentTotal) {
+      setPage(Math.max(0, Math.ceil(currentTotal / rowsPerPage) - 1));
+    }
+  }, [currentTotal, page, rowsPerPage]);
+
 
   // ColDefs for Active Tables AG Grid
   const activeTableColDefs = useMemo<ColDef<DataTable>[]>(() => [
@@ -1016,7 +1151,7 @@ export const TableListPage: React.FC = () => {
             }}
           >
             <Button
-              onClick={() => setCurrentTab(0)}
+              onClick={() => handleTabChange(0)}
               sx={{
                 borderRadius: '9999px',
                 px: 2.5,
@@ -1036,7 +1171,7 @@ export const TableListPage: React.FC = () => {
               Active Tables {tables.length > 0 && `(${tables.length})`}
             </Button>
             <Button
-              onClick={() => setCurrentTab(1)}
+              onClick={() => handleTabChange(1)}
               sx={{
                 borderRadius: '9999px',
                 px: 2.5,
@@ -1056,7 +1191,7 @@ export const TableListPage: React.FC = () => {
               Trash Tables {trashTables.length > 0 && `(${trashTables.length})`}
             </Button>
             <Button
-              onClick={() => setCurrentTab(2)}
+              onClick={() => handleTabChange(2)}
               sx={{
                 borderRadius: '9999px',
                 px: 2.5,
@@ -1294,120 +1429,215 @@ export const TableListPage: React.FC = () => {
                   </Button>
                 </Box>
               </Box>
-            ) : layoutMode === 'table' ? (
-              /* Ultra-Premium Bespoke Table matching reference image */
-              <TableContainer sx={{ overflowX: 'auto' }}>
-                <Table sx={{ minWidth: 920 }}>
-                  <TableHead>
-                    <TableRow
-                      sx={{
-                        '& th': {
-                          borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.08)' : '1px solid #f1f5f9',
-                          py: 1.8,
-                        },
-                      }}
-                    >
-                      <TableCell sx={{ width: 44, pl: 1 }}>
-                        <CheckCircle sx={{ color: '#0f172a', fontSize: '1.25rem' }} />
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Name</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Order Details</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Phone / Access</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Schedule</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Status</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right" sx={{ width: 44, pr: 1 }}>
-                        <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                      </TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {tables.map((table) => {
-                      const schedule = formatSchedule(table.created_at);
-                      return (
+            ) : (
+              <>
+                {/* Bulk Action Bar for Active Tables */}
+                {selectedTableIds.length > 0 && (
+                  <Paper
+                    elevation={3}
+                    sx={{
+                      p: 1.5,
+                      px: 2.5,
+                      mb: 2.5,
+                      borderRadius: 3,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 1.5,
+                      bgcolor: mode === 'dark' ? 'rgba(30, 41, 59, 0.95)' : '#f8fafc',
+                      border: '1px solid',
+                      borderColor: mode === 'dark' ? 'rgba(239, 68, 68, 0.4)' : '#fecaca',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                      <Chip
+                        label={`${selectedTableIds.length} ${selectedTableIds.length === 1 ? 'table' : 'tables'} selected`}
+                        color="primary"
+                        size="small"
+                        sx={{ fontWeight: 700 }}
+                      />
+                      <Button
+                        size="small"
+                        onClick={() => setSelectedTableIds([])}
+                        sx={{ textTransform: 'none', color: 'text.secondary', fontSize: '0.82rem' }}
+                      >
+                        Deselect All
+                      </Button>
+                      {selectedTableIds.length < tables.length && (
+                        <Button
+                          size="small"
+                          onClick={() => setSelectedTableIds(tables.map((t) => t.id))}
+                          sx={{ textTransform: 'none', color: 'primary.main', fontSize: '0.82rem', fontWeight: 600 }}
+                        >
+                          Select all {tables.length} tables
+                        </Button>
+                      )}
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Button
+                        variant="contained"
+                        color="error"
+                        size="small"
+                        startIcon={<DeleteOutlined />}
+                        onClick={() => setBulkDeleteDialogOpen(true)}
+                        sx={{
+                          borderRadius: '9999px',
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          px: 2.5,
+                          boxShadow: '0 4px 12px rgba(239, 68, 68, 0.35)',
+                        }}
+                      >
+                        Move to Trash ({selectedTableIds.length})
+                      </Button>
+                    </Box>
+                  </Paper>
+                )}
+
+                {layoutMode === 'table' ? (
+                  /* Ultra-Premium Bespoke Table matching reference image */
+                  <TableContainer sx={{ overflowX: 'auto' }}>
+                    <Table sx={{ minWidth: 920 }}>
+                      <TableHead>
                         <TableRow
-                          key={table.id}
-                          hover
-                          onClick={() => handleCardClick(table)}
                           sx={{
-                            cursor: 'pointer',
-                            transition: 'background-color 0.15s ease',
-                            '& td': {
-                              borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.04)' : '1px solid #f8fafc',
-                              py: 2,
-                            },
-                            '&:hover': {
-                              bgcolor: mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#f8fafc',
+                            '& th': {
+                              borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.08)' : '1px solid #f1f5f9',
+                              py: 1.8,
                             },
                           }}
                         >
-                          {/* Col 1: Circular Check / Favorite */}
-                          <TableCell sx={{ pl: 1 }} onClick={(e) => e.stopPropagation()}>
-                            <IconButton
+                          <TableCell sx={{ width: 44, pl: 1 }}>
+                            <Checkbox
                               size="small"
-                              onClick={(e) => handleToggleFavorite(e, table)}
-                              sx={{ p: 0.4 }}
-                            >
-                              {table.is_favorite ? (
-                                <Star sx={{ color: '#f59e0b', fontSize: '1.25rem' }} />
-                              ) : (
-                                <CheckCircleOutlined sx={{ color: '#cbd5e1', fontSize: '1.25rem', '&:hover': { color: '#64748b' } }} />
-                              )}
-                            </IconButton>
+                              checked={paginatedTables.length > 0 && paginatedTables.every((t) => selectedTableIds.includes(t.id))}
+                              indeterminate={
+                                paginatedTables.some((t) => selectedTableIds.includes(t.id)) &&
+                                !paginatedTables.every((t) => selectedTableIds.includes(t.id))
+                              }
+                              onChange={handleSelectAllTables}
+                              sx={{
+                                color: mode === 'dark' ? '#64748b' : '#94a3b8',
+                                '&.Mui-checked': { color: 'primary.main' },
+                                '&.MuiCheckbox-indeterminate': { color: 'primary.main' },
+                                p: 0.5,
+                              }}
+                            />
                           </TableCell>
-
-                          {/* Col 2: Avatar + Name + Slug */}
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.8 }}>
-                              <Avatar
-                                sx={{
-                                  width: 36,
-                                  height: 36,
-                                  fontSize: '0.8rem',
-                                  fontWeight: 700,
-                                  background: getAvatarGradient(table.name),
-                                  color: '#ffffff',
-                                  boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-                                }}
-                              >
-                                {getInitials(table.display_name)}
-                              </Avatar>
-                              <Box sx={{ minWidth: 0 }}>
-                                <Typography
-                                  variant="body2"
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Name</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Order Details</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Phone / Access</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Schedule</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Status</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell align="right" sx={{ width: 44, pr: 1 }}>
+                            <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {paginatedTables.map((table) => {
+                          const schedule = formatSchedule(table.created_at);
+                          return (
+                            <TableRow
+                              key={table.id}
+                              hover
+                              onClick={() => handleCardClick(table)}
+                              sx={{
+                                cursor: 'pointer',
+                                transition: 'background-color 0.15s ease',
+                                bgcolor: selectedTableIds.includes(table.id)
+                                  ? mode === 'dark' ? 'rgba(37, 99, 235, 0.12)' : 'rgba(37, 99, 235, 0.05)'
+                                  : 'inherit',
+                                '& td': {
+                                  borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.04)' : '1px solid #f8fafc',
+                                  py: 2,
+                                },
+                                '&:hover': {
+                                  bgcolor: mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#f8fafc',
+                                },
+                              }}
+                            >
+                              {/* Col 1: Multi-Select Checkbox */}
+                              <TableCell sx={{ pl: 1, width: 44 }} onClick={(e) => e.stopPropagation()}>
+                                <Checkbox
+                                  size="small"
+                                  checked={selectedTableIds.includes(table.id)}
+                                  onChange={() => handleToggleSelectTable(table.id)}
                                   sx={{
-                                    fontWeight: 700,
-                                    color: 'text.primary',
-                                    lineHeight: 1.25,
-                                    '&:hover': { color: 'primary.main' },
+                                    color: mode === 'dark' ? '#64748b' : '#cbd5e1',
+                                    '&.Mui-checked': { color: 'primary.main' },
+                                    p: 0.5,
                                   }}
-                                >
-                                  {table.display_name}
-                                </Typography>
+                                />
+                              </TableCell>
+
+                              {/* Col 2: Star + Avatar + Name + Slug */}
+                              <TableCell>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => handleToggleFavorite(e, table)}
+                                    sx={{ p: 0.4 }}
+                                    title={table.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+                                  >
+                                    {table.is_favorite ? (
+                                      <Star sx={{ color: '#f59e0b', fontSize: '1.25rem' }} />
+                                    ) : (
+                                      <StarBorder sx={{ color: '#cbd5e1', fontSize: '1.25rem', '&:hover': { color: '#f59e0b' } }} />
+                                    )}
+                                  </IconButton>
+                                  <Avatar
+                                    sx={{
+                                      width: 36,
+                                      height: 36,
+                                      fontSize: '0.8rem',
+                                      fontWeight: 700,
+                                      background: getAvatarGradient(table.name),
+                                      color: '#ffffff',
+                                      boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+                                    }}
+                                  >
+                                    {getInitials(table.display_name)}
+                                  </Avatar>
+                                  <Box sx={{ minWidth: 0 }}>
+                                    <Typography
+                                      variant="body2"
+                                      sx={{
+                                        fontWeight: 700,
+                                        color: 'text.primary',
+                                        lineHeight: 1.25,
+                                        '&:hover': { color: 'primary.main' },
+                                      }}
+                                    >
+                                      {table.display_name}
+                                    </Typography>
                                 <Typography
                                   variant="caption"
                                   sx={{
@@ -1488,7 +1718,7 @@ export const TableListPage: React.FC = () => {
             ) : (
               /* Fallback Card View */
               <Grid container spacing={2.5}>
-                {tables.map((table) => (
+                {paginatedTables.map((table) => (
                   <Grid size={{ xs: 12, sm: 6, md: 4 }} key={table.id}>
                     <Card
                       sx={{
@@ -1498,6 +1728,7 @@ export const TableListPage: React.FC = () => {
                         borderRadius: 3,
                         cursor: 'pointer',
                         transition: 'transform 0.2s, box-shadow 0.2s',
+                        border: selectedTableIds.includes(table.id) ? '2px solid #2563eb' : undefined,
                         '&:hover': {
                           transform: 'translateY(-3px)',
                           boxShadow: '0 12px 30px rgba(0,0,0,0.2)',
@@ -1507,13 +1738,22 @@ export const TableListPage: React.FC = () => {
                     >
                       <Box sx={{ flexGrow: 1, p: 2.5, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', mb: 1.5 }}>
-                          <Chip
-                            icon={<TableChartOutlined sx={{ fontSize: '0.9rem !important' }} />}
-                            label={`${table.columns?.length || 0} Cols`}
-                            size="small"
-                            color="primary"
-                            variant="outlined"
-                          />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Checkbox
+                              size="small"
+                              checked={selectedTableIds.includes(table.id)}
+                              onChange={() => handleToggleSelectTable(table.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              sx={{ p: 0.2 }}
+                            />
+                            <Chip
+                              icon={<TableChartOutlined sx={{ fontSize: '0.9rem !important' }} />}
+                              label={`${table.columns?.length || 0} Cols`}
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                            />
+                          </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                             <IconButton
                               size="small"
@@ -1570,6 +1810,8 @@ export const TableListPage: React.FC = () => {
                 ))}
               </Grid>
             )}
+              </>
+            )}
           </>
         )}
 
@@ -1597,74 +1839,184 @@ export const TableListPage: React.FC = () => {
                   No tables are currently in the trash. Soft-deleted tables will appear here and can be restored anytime.
                 </Typography>
               </Box>
-            ) : layoutMode === 'table' ? (
-              /* Ultra-Premium Bespoke Table for Trash */
-              <TableContainer sx={{ overflowX: 'auto' }}>
-                <Table sx={{ minWidth: 920 }}>
-                  <TableHead>
-                    <TableRow
-                      sx={{
-                        '& th': {
-                          borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.08)' : '1px solid #f1f5f9',
-                          py: 1.8,
-                        },
-                      }}
-                    >
-                      <TableCell sx={{ width: 44, pl: 1 }}>
-                        <CheckCircle sx={{ color: '#ef4444', fontSize: '1.25rem' }} />
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Name</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Details</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Previous Access</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Created Date</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
-                          <span>Status</span>
-                          <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right" sx={{ width: 44, pr: 1 }}>
-                        <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
-                      </TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {trashTables.map((table) => {
-                      const schedule = formatSchedule(table.created_at);
-                      return (
+            ) : (
+              <>
+                {/* Bulk Action Bar for Trash Tables */}
+                {selectedTrashTableIds.length > 0 && (
+                  <Paper
+                    elevation={3}
+                    sx={{
+                      p: 1.5,
+                      px: 2.5,
+                      mb: 2.5,
+                      borderRadius: 3,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 1.5,
+                      bgcolor: mode === 'dark' ? 'rgba(30, 41, 59, 0.95)' : '#f8fafc',
+                      border: '1px solid',
+                      borderColor: mode === 'dark' ? 'rgba(59, 130, 246, 0.4)' : '#bfdbfe',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                      <Chip
+                        label={`${selectedTrashTableIds.length} ${selectedTrashTableIds.length === 1 ? 'trash table' : 'trash tables'} selected`}
+                        color="secondary"
+                        size="small"
+                        sx={{ fontWeight: 700 }}
+                      />
+                      <Button
+                        size="small"
+                        onClick={() => setSelectedTrashTableIds([])}
+                        sx={{ textTransform: 'none', color: 'text.secondary', fontSize: '0.82rem' }}
+                      >
+                        Deselect All
+                      </Button>
+                      {selectedTrashTableIds.length < trashTables.length && (
+                        <Button
+                          size="small"
+                          onClick={() => setSelectedTrashTableIds(trashTables.map((t) => t.id))}
+                          sx={{ textTransform: 'none', color: 'primary.main', fontSize: '0.82rem', fontWeight: 600 }}
+                        >
+                          Select all {trashTables.length} trash tables
+                        </Button>
+                      )}
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        size="small"
+                        startIcon={<RestoreFromTrashOutlined />}
+                        onClick={handleBulkRestoreTables}
+                        disabled={isBulkDeleting}
+                        sx={{
+                          borderRadius: '9999px',
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          px: 2.2,
+                        }}
+                      >
+                        Restore Selected ({selectedTrashTableIds.length})
+                      </Button>
+                      <Button
+                        variant="contained"
+                        color="error"
+                        size="small"
+                        startIcon={<DeleteForeverOutlined />}
+                        onClick={() => setBulkPermDeleteDialogOpen(true)}
+                        disabled={isBulkDeleting}
+                        sx={{
+                          borderRadius: '9999px',
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          px: 2.2,
+                          boxShadow: '0 4px 12px rgba(239, 68, 68, 0.35)',
+                        }}
+                      >
+                        Permanently Delete ({selectedTrashTableIds.length})
+                      </Button>
+                    </Box>
+                  </Paper>
+                )}
+
+                {layoutMode === 'table' ? (
+                  /* Ultra-Premium Bespoke Table for Trash */
+                  <TableContainer sx={{ overflowX: 'auto' }}>
+                    <Table sx={{ minWidth: 920 }}>
+                      <TableHead>
                         <TableRow
-                          key={table.id}
-                          hover
                           sx={{
-                            '& td': {
-                              borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.04)' : '1px solid #f8fafc',
-                              py: 2,
+                            '& th': {
+                              borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.08)' : '1px solid #f1f5f9',
+                              py: 1.8,
                             },
                           }}
                         >
-                          <TableCell sx={{ pl: 1 }}>
-                            <CheckCircleOutlined sx={{ color: '#f87171', fontSize: '1.25rem' }} />
+                          <TableCell sx={{ width: 44, pl: 1 }}>
+                            <Checkbox
+                              size="small"
+                              checked={paginatedTrashTables.length > 0 && paginatedTrashTables.every((t) => selectedTrashTableIds.includes(t.id))}
+                              indeterminate={
+                                paginatedTrashTables.some((t) => selectedTrashTableIds.includes(t.id)) &&
+                                !paginatedTrashTables.every((t) => selectedTrashTableIds.includes(t.id))
+                              }
+                              onChange={handleSelectAllTrashTables}
+                              sx={{
+                                color: mode === 'dark' ? '#64748b' : '#94a3b8',
+                                '&.Mui-checked': { color: '#ef4444' },
+                                '&.MuiCheckbox-indeterminate': { color: '#ef4444' },
+                                p: 0.5,
+                              }}
+                            />
                           </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Name</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Details</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Previous Access</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Created Date</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', color: '#64748b' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
+                              <span>Status</span>
+                              <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell align="right" sx={{ width: 44, pr: 1 }}>
+                            <Typography sx={{ color: '#cbd5e1', fontSize: '0.8rem' }}>:</Typography>
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {paginatedTrashTables.map((table) => {
+                          const schedule = formatSchedule(table.created_at);
+                          return (
+                            <TableRow
+                              key={table.id}
+                              hover
+                              sx={{
+                                bgcolor: selectedTrashTableIds.includes(table.id)
+                                  ? mode === 'dark' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.05)'
+                                  : 'inherit',
+                                '& td': {
+                                  borderBottom: mode === 'dark' ? '1px solid rgba(255,255,255,0.04)' : '1px solid #f8fafc',
+                                  py: 2,
+                                },
+                              }}
+                            >
+                              <TableCell sx={{ pl: 1, width: 44 }} onClick={(e) => e.stopPropagation()}>
+                                <Checkbox
+                                  size="small"
+                                  checked={selectedTrashTableIds.includes(table.id)}
+                                  onChange={() => handleToggleSelectTrashTable(table.id)}
+                                  sx={{
+                                    color: mode === 'dark' ? '#64748b' : '#cbd5e1',
+                                    '&.Mui-checked': { color: '#ef4444' },
+                                    p: 0.5,
+                                  }}
+                                />
+                              </TableCell>
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.8 }}>
                               <Avatar
@@ -1766,7 +2118,7 @@ export const TableListPage: React.FC = () => {
             ) : (
               /* Fallback Card View for Trash */
               <Grid container spacing={2.5}>
-                {trashTables.map((table) => (
+                {paginatedTrashTables.map((table) => (
                   <Grid size={{ xs: 12, sm: 6, md: 4 }} key={table.id}>
                     <Card
                       sx={{
@@ -1774,13 +2126,22 @@ export const TableListPage: React.FC = () => {
                         display: 'flex',
                         flexDirection: 'column',
                         borderRadius: 3,
-                        border: '1px dashed',
-                        borderColor: 'error.main',
+                        border: selectedTrashTableIds.includes(table.id) ? '2px solid #ef4444' : '1px dashed',
+                        borderColor: selectedTrashTableIds.includes(table.id) ? '#ef4444' : 'error.main',
                         bgcolor: 'rgba(239, 68, 68, 0.03)',
                         p: 2.5,
                       }}
                     >
-                      <Chip label="In Trash" size="small" color="error" variant="outlined" sx={{ fontWeight: 700, width: 'fit-content', mb: 1.5 }} />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                        <Checkbox
+                          size="small"
+                          checked={selectedTrashTableIds.includes(table.id)}
+                          onChange={() => handleToggleSelectTrashTable(table.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{ p: 0.2, color: '#ef4444', '&.Mui-checked': { color: '#ef4444' } }}
+                        />
+                        <Chip label="In Trash" size="small" color="error" variant="outlined" sx={{ fontWeight: 700 }} />
+                      </Box>
                       <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>{table.display_name}</Typography>
                       <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1.5, fontFamily: 'monospace' }}>#{table.name}</Typography>
                       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2, flexGrow: 1 }}>{table.description || 'No description provided.'}</Typography>
@@ -1793,6 +2154,8 @@ export const TableListPage: React.FC = () => {
                   </Grid>
                 ))}
               </Grid>
+            )}
+              </>
             )}
           </>
         )}
@@ -1872,7 +2235,7 @@ export const TableListPage: React.FC = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredDeletedRecords.map((rec) => {
+                    {paginatedDeletedRecords.map((rec) => {
                       const schedule = formatSchedule(rec.deleted_at);
                       return (
                         <TableRow
@@ -1991,13 +2354,13 @@ export const TableListPage: React.FC = () => {
           </>
         )}
 
-        {/* BOTTOM SUMMARY FOOTER */}
+        {/* BOTTOM SUMMARY FOOTER & PAGINATION */}
         <Box
           sx={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            pt: 3,
+            pt: 2,
             mt: 2,
             borderTop: mode === 'dark' ? '1px solid rgba(255,255,255,0.06)' : '1px solid #f1f5f9',
             flexWrap: 'wrap',
@@ -2005,13 +2368,26 @@ export const TableListPage: React.FC = () => {
           }}
         >
           <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-            Showing {currentTab === 0 ? tables.length : currentTab === 1 ? trashTables.length : filteredDeletedRecords.length} records • Real-time synchronization active
+            Showing {currentTab === 0 ? Math.min(tables.length, paginatedTables.length) : currentTab === 1 ? Math.min(trashTables.length, paginatedTrashTables.length) : Math.min(filteredDeletedRecords.length, paginatedDeletedRecords.length)} of {currentTab === 0 ? tables.length : currentTab === 1 ? trashTables.length : filteredDeletedRecords.length} entries • Real-time synchronization active
           </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-              Dynamic Table Hub 2.0
-            </Typography>
-          </Box>
+          <TablePagination
+            component="div"
+            count={currentTab === 0 ? tables.length : currentTab === 1 ? trashTables.length : filteredDeletedRecords.length}
+            page={page}
+            onPageChange={(_, newPage) => setPage(newPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => {
+              setRowsPerPage(parseInt(e.target.value, 10));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            labelRowsPerPage="Per page:"
+            sx={{
+              border: 'none',
+              '.MuiTablePagination-toolbar': { minHeight: 40, p: 0 },
+              color: 'text.secondary',
+            }}
+          />
         </Box>
       </Paper>
 
@@ -2146,6 +2522,56 @@ export const TableListPage: React.FC = () => {
             disabled={permDeleteConfirmText !== 'PERMANENT' || isDeleting}
           >
             {isDeleting ? <CircularProgress size={20} /> : 'Delete Permanently'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Move to Trash Confirmation Dialog */}
+      <Dialog open={bulkDeleteDialogOpen} onClose={() => setBulkDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, color: 'error.main' }}>
+          Move {selectedTableIds.length} Tables to Trash?
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            You are about to move <strong>{selectedTableIds.length}</strong> selected {selectedTableIds.length === 1 ? 'table' : 'tables'} to the Trash. They will be removed from the active view, and you can restore them anytime from the <strong>Trash Tables</strong> tab.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setBulkDeleteDialogOpen(false)} disabled={isBulkDeleting}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleBulkMoveToTrash}
+            disabled={isBulkDeleting}
+            startIcon={isBulkDeleting ? <CircularProgress size={18} color="inherit" /> : <DeleteOutlined />}
+            sx={{ borderRadius: '9999px', textTransform: 'none', fontWeight: 700, px: 2.5 }}
+          >
+            {isBulkDeleting ? 'Moving...' : `Move ${selectedTableIds.length} Tables`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Permanent Delete Confirmation Dialog */}
+      <Dialog open={bulkPermDeleteDialogOpen} onClose={() => setBulkPermDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, color: 'error.main' }}>
+          Permanently Delete {selectedTrashTableIds.length} Tables?
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            This action is <strong>completely irreversible</strong>. All <strong>{selectedTrashTableIds.length}</strong> selected tables, their columns, and all record data will be permanently wiped from the database.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setBulkPermDeleteDialogOpen(false)} disabled={isBulkDeleting}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleBulkPermanentDelete}
+            disabled={isBulkDeleting}
+            startIcon={isBulkDeleting ? <CircularProgress size={18} color="inherit" /> : <DeleteForeverOutlined />}
+            sx={{ borderRadius: '9999px', textTransform: 'none', fontWeight: 700, px: 2.5 }}
+          >
+            {isBulkDeleting ? 'Erasing...' : `Permanently Delete ${selectedTrashTableIds.length} Tables`}
           </Button>
         </DialogActions>
       </Dialog>

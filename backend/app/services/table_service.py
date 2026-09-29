@@ -427,5 +427,130 @@ class TableService:
         )
         return list(result.scalars().all())
 
+    @staticmethod
+    async def bulk_delete_tables(
+        db: AsyncSession,
+        table_ids: List[UUID],
+        user: User,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> int:
+        """Soft deletes multiple tables by setting is_active = False."""
+        deleted_count = 0
+        for table_id in table_ids:
+            try:
+                table = await TableService.get_table_by_id(db, table_id)
+                if not table.is_active:
+                    continue
+                table.is_active = False
+                table.updated_by_id = user.id
+
+                history = TableHistory(
+                    table_id=table.id,
+                    action="TABLE_DELETED",
+                    details={"display_name": table.display_name, "status": "MOVED_TO_TRASH", "bulk": True},
+                    changed_by_id=user.id,
+                    changed_by_username=user.username,
+                )
+                db.add(history)
+
+                await audit_service.log_event(
+                    db=db,
+                    action=AuditAction.TABLE_DELETED,
+                    username=user.username,
+                    user_id=user.id,
+                    table_id=table_id,
+                    table_name=table.name,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    details={"action": "BULK_MOVE_TO_TRASH"},
+                )
+                deleted_count += 1
+            except Exception:
+                continue
+
+        await db.commit()
+        return deleted_count
+
+    @staticmethod
+    async def bulk_restore_tables(
+        db: AsyncSession,
+        table_ids: List[UUID],
+        user: User,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> int:
+        """Restores multiple soft-deleted tables by setting is_active = True."""
+        restored_count = 0
+        for table_id in table_ids:
+            try:
+                table = await TableService.get_table_by_id(db, table_id)
+                if table.is_active:
+                    continue
+                table.is_active = True
+                table.updated_by_id = user.id
+
+                history = TableHistory(
+                    table_id=table.id,
+                    action="TABLE_RESTORED",
+                    details={"display_name": table.display_name, "status": "RESTORED", "bulk": True},
+                    changed_by_id=user.id,
+                    changed_by_username=user.username,
+                )
+                db.add(history)
+
+                await audit_service.log_event(
+                    db=db,
+                    action=AuditAction.TABLE_UPDATED,
+                    username=user.username,
+                    user_id=user.id,
+                    table_id=table.id,
+                    table_name=table.name,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    details={"action": "BULK_RESTORE_TABLE"},
+                )
+                restored_count += 1
+            except Exception:
+                continue
+
+        await db.commit()
+        return restored_count
+
+    @staticmethod
+    async def bulk_permanent_delete_tables(
+        db: AsyncSession,
+        table_ids: List[UUID],
+        user: User,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> int:
+        """Permanently deletes multiple tables and all their data."""
+        deleted_count = 0
+        for table_id in table_ids:
+            try:
+                table = await TableService.get_table_by_id(db, table_id)
+                table_name = table.name
+                await db.delete(table)
+
+                await audit_service.log_event(
+                    db=db,
+                    action=AuditAction.TABLE_DELETED,
+                    username=user.username,
+                    user_id=user.id,
+                    table_id=table_id,
+                    table_name=table_name,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    details={"action": "BULK_PERMANENT_DELETE"},
+                )
+                deleted_count += 1
+            except Exception:
+                continue
+
+        await db.commit()
+        return deleted_count
+
 
 table_service = TableService()
+
