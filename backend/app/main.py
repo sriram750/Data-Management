@@ -152,6 +152,14 @@ def _ensure_schema_migrations(connection):
                         logger.warning(f"Notice dropping not-null on table_id: {tid_err}")
             except Exception as e:
                 logger.warning(f"File attachments migration notice: {e}")
+
+        # Ensure all columns have non-empty display_name and name
+        try:
+            connection.execute(text("UPDATE data_columns SET display_name = name WHERE display_name = '' OR display_name IS NULL"))
+            connection.execute(text("UPDATE data_columns SET display_name = 'Column' WHERE display_name = '' OR display_name IS NULL"))
+            connection.execute(text("UPDATE data_columns SET name = 'col_' || substr(id, 1, 8) WHERE name = '' OR name IS NULL"))
+        except Exception as col_fix_err:
+            logger.warning(f"Column display_name fix notice: {col_fix_err}")
     except Exception as e:
         logger.warning(f"Schema migration check notice: {e}")
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.dynamic_column import ColumnType
 
 
@@ -16,6 +16,18 @@ class ColumnBase(BaseModel):
     default_value: Optional[str] = None
     validation_rules: Optional[Dict[str, Any]] = None
     display_order: int = 0
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def sanitize_name(cls, v: Any) -> str:
+        s = str(v).strip() if v is not None else ""
+        return s if s else "column"
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def sanitize_display_name(cls, v: Any) -> str:
+        s = str(v).strip() if v is not None else ""
+        return s if s else "Column"
 
 
 class ColumnCreate(ColumnBase):
