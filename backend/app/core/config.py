@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     
     # Upload limits & file attachments
     MAX_UPLOAD_SIZE_MB: int = 50
-    ALLOWED_FILE_TYPES: List[str] = ["pdf", "docx", "xlsx", "csv", "png", "jpg", "jpeg", "txt"]
+    ALLOWED_FILE_TYPES: List[str] = ["pdf", "doc", "docx", "xlsx", "csv", "png", "jpg", "jpeg", "txt"]
     UPLOAD_STORAGE_PATH: str = "uploads"
     
     # Redis (Optional cache/background)

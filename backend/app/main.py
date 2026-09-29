@@ -107,21 +107,51 @@ def _ensure_schema_migrations(connection):
                 if "password_hash" not in existing_cols:
                     connection.execute(text("ALTER TABLE data_tables ADD COLUMN password_hash VARCHAR(255) NULL"))
 
+            # auditaction enum migration for new document actions
+            try:
+                res_type = connection.execute(text("SELECT oid FROM pg_type WHERE typname = 'auditaction'"))
+                type_row = res_type.fetchone()
+                if type_row:
+                    res_enum = connection.execute(
+                        text("SELECT enumlabel FROM pg_enum WHERE enumtypid = :oid"),
+                        {"oid": type_row[0]}
+                    )
+                    existing_enums = {row[0] for row in res_enum.fetchall()}
+                    for action_val in ("DOCUMENT_VIEWED", "DOCUMENT_EDITED", "DOCUMENT_REVERTED", "DOCUMENT_DELETED"):
+                        if action_val not in existing_enums:
+                            try:
+                                connection.execute(text(f"ALTER TYPE auditaction ADD VALUE '{action_val}'"))
+                            except Exception as enum_err:
+                                logger.warning(f"Could not add enum value {action_val} to auditaction: {enum_err}")
+            except Exception as e:
+                logger.warning(f"Audit action enum check notice: {e}")
+
             # file_attachments migration
-            res_att = connection.execute(text(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = 'file_attachments'"
-            ))
-            att_cols = {row[0] for row in res_att.fetchall()}
-            if att_cols:
-                if "version" not in att_cols:
-                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))
-                if "is_deleted" not in att_cols:
-                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE"))
-                if "deleted_at" not in att_cols:
-                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE NULL"))
-                if "deleted_by_id" not in att_cols:
-                    connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_by_id CHAR(36) NULL"))
-                connection.execute(text("ALTER TABLE file_attachments ALTER COLUMN table_id DROP NOT NULL"))
+            try:
+                res_att = connection.execute(text(
+                    "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'file_attachments'"
+                ))
+                att_cols = {row[0]: row[1] for row in res_att.fetchall()}
+                if att_cols:
+                    if "version" not in att_cols:
+                        connection.execute(text("ALTER TABLE file_attachments ADD COLUMN version INTEGER NOT NULL DEFAULT 1"))
+                    if "is_deleted" not in att_cols:
+                        connection.execute(text("ALTER TABLE file_attachments ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE"))
+                    if "deleted_at" not in att_cols:
+                        connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE NULL"))
+                    if "deleted_by_id" not in att_cols:
+                        connection.execute(text("ALTER TABLE file_attachments ADD COLUMN deleted_by_id UUID NULL"))
+                    elif att_cols.get("deleted_by_id") in ("character", "character varying"):
+                        try:
+                            connection.execute(text("ALTER TABLE file_attachments ALTER COLUMN deleted_by_id TYPE UUID USING deleted_by_id::uuid"))
+                        except Exception:
+                            pass
+                    try:
+                        connection.execute(text("ALTER TABLE file_attachments ALTER COLUMN table_id DROP NOT NULL"))
+                    except Exception as tid_err:
+                        logger.warning(f"Notice dropping not-null on table_id: {tid_err}")
+            except Exception as e:
+                logger.warning(f"File attachments migration notice: {e}")
     except Exception as e:
         logger.warning(f"Schema migration check notice: {e}")
 

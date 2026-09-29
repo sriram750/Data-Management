@@ -10,6 +10,7 @@ from sqlalchemy import desc, func, or_, select
 
 from app.core.config import settings
 from app.core.exceptions import ForbiddenException, NotFoundException, ValidationException
+from app.core.logging import logger
 from app.models.audit_log import AuditAction, AuditLog
 from app.models.file_attachment import AttachmentVersion, FileAttachment
 from app.models.user import User
@@ -51,8 +52,17 @@ class AttachmentService:
         upload_dir = AttachmentService._ensure_upload_dir()
         file_path = os.path.join(upload_dir, unique_stored_name)
 
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
+        try:
+            with open(file_path, "wb") as f:
+                f.write(file_bytes)
+        except PermissionError as pe:
+            logger.error(f"Permission denied writing to {file_path}: {pe}")
+            raise ValidationException(
+                f"Storage permission denied: Unable to write to {upload_dir}. Please check disk/volume permissions."
+            )
+        except Exception as fe:
+            logger.error(f"Failed to write file to storage: {fe}")
+            raise ValidationException(f"Failed to write file to storage: {fe}")
 
         attachment = FileAttachment(
             table_id=table_id,
@@ -81,17 +91,21 @@ class AttachmentService:
         )
         db.add(initial_version)
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.FILE_UPLOADED,
-            username=user.username,
-            user_id=user.id,
-            table_id=table_id,
-            record_id=record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={"filename": filename, "size": len(file_bytes), "hash": sha256, "version": 1},
-        )
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.FILE_UPLOADED,
+                username=user.username,
+                user_id=user.id,
+                table_id=table_id,
+                record_id=record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={"filename": filename, "size": len(file_bytes), "hash": sha256, "version": 1},
+            )
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for FILE_UPLOADED: {audit_err}")
+
         await db.commit()
         await db.refresh(attachment)
         return attachment
@@ -132,22 +146,26 @@ class AttachmentService:
         with open(file_path, "rb") as f:
             data = f.read()
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.FILE_DOWNLOADED,
-            username=user.username,
-            user_id=user.id,
-            table_id=att.table_id,
-            record_id=att.record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={
-                "filename": att.original_filename,
-                "size": len(data),
-                "version": version_number or att.version,
-            },
-        )
-        await db.commit()
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.FILE_DOWNLOADED,
+                username=user.username,
+                user_id=user.id,
+                table_id=att.table_id,
+                record_id=att.record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={
+                    "filename": att.original_filename,
+                    "size": len(data),
+                    "version": version_number or att.version,
+                },
+            )
+            await db.commit()
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for FILE_DOWNLOADED: {audit_err}")
+            await db.rollback()
 
         return data, att.content_type, att.original_filename
 
@@ -185,22 +203,27 @@ class AttachmentService:
         if not os.path.exists(file_path):
             raise NotFoundException("Attachment file not found on disk.")
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.DOCUMENT_VIEWED,
-            username=user.username,
-            user_id=user.id,
-            table_id=att.table_id,
-            record_id=att.record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={
-                "filename": att.original_filename,
-                "version": version_number or att.version,
-                "type": att.content_type,
-            },
-        )
-        await db.commit()
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.DOCUMENT_VIEWED,
+                username=user.username,
+                user_id=user.id,
+                table_id=att.table_id,
+                record_id=att.record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={
+                    "filename": att.original_filename,
+                    "version": version_number or att.version,
+                    "type": att.content_type,
+                },
+            )
+            await db.commit()
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for DOCUMENT_VIEWED: {audit_err}")
+            await db.rollback()
+
         return file_path, att.content_type, att.original_filename
 
     @staticmethod
@@ -249,23 +272,28 @@ class AttachmentService:
         )
         db.add(new_version)
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.DOCUMENT_EDITED,
-            username=user.username,
-            user_id=user.id,
-            table_id=att.table_id,
-            record_id=att.record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={
-                "filename": att.original_filename,
-                "version": new_version_num,
-                "summary": change_summary,
-                "size": len(file_bytes),
-            },
-        )
-        await db.commit()
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.DOCUMENT_EDITED,
+                username=user.username,
+                user_id=user.id,
+                table_id=att.table_id,
+                record_id=att.record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={
+                    "filename": att.original_filename,
+                    "version": new_version_num,
+                    "summary": change_summary,
+                    "size": len(file_bytes),
+                },
+            )
+            await db.commit()
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for DOCUMENT_EDITED: {audit_err}")
+            await db.commit()
+
         await db.refresh(att)
         return att
 
@@ -324,22 +352,27 @@ class AttachmentService:
         )
         db.add(revert_version)
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.DOCUMENT_REVERTED,
-            username=user.username,
-            user_id=user.id,
-            table_id=att.table_id,
-            record_id=att.record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={
-                "filename": att.original_filename,
-                "reverted_from_version": target_version.version_number,
-                "new_version": new_version_num,
-            },
-        )
-        await db.commit()
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.DOCUMENT_REVERTED,
+                username=user.username,
+                user_id=user.id,
+                table_id=att.table_id,
+                record_id=att.record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={
+                    "filename": att.original_filename,
+                    "reverted_from_version": target_version.version_number,
+                    "new_version": new_version_num,
+                },
+            )
+            await db.commit()
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for DOCUMENT_REVERTED: {audit_err}")
+            await db.commit()
+
         await db.refresh(att)
         return att
 
@@ -369,12 +402,13 @@ class AttachmentService:
                         FileAttachment.original_filename.ilike("%.pdf"),
                     )
                 )
-            elif ft in ("word", "docx"):
+            elif ft in ("word", "docx", "doc"):
                 query = query.where(
                     or_(
                         FileAttachment.content_type.ilike("%word%"),
                         FileAttachment.content_type.ilike("%officedocument%"),
                         FileAttachment.original_filename.ilike("%.docx"),
+                        FileAttachment.original_filename.ilike("%.doc"),
                     )
                 )
 
@@ -405,19 +439,23 @@ class AttachmentService:
         att.deleted_at = datetime.now(timezone.utc)
         att.deleted_by_id = user.id
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.DOCUMENT_DELETED,
-            username=user.username,
-            user_id=user.id,
-            table_id=att.table_id,
-            record_id=att.record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={"filename": att.original_filename, "action": "MOVE_TO_TRASH"},
-        )
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.DOCUMENT_DELETED,
+                username=user.username,
+                user_id=user.id,
+                table_id=att.table_id,
+                record_id=att.record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={"filename": att.original_filename, "action": "MOVE_TO_TRASH"},
+            )
+            await db.commit()
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for DOCUMENT_DELETED: {audit_err}")
+            await db.commit()
 
-        await db.commit()
         return True
 
     @staticmethod
@@ -438,19 +476,23 @@ class AttachmentService:
         att.deleted_at = None
         att.deleted_by_id = None
 
-        await audit_service.log_event(
-            db=db,
-            action=AuditAction.DOCUMENT_EDITED,
-            username=user.username,
-            user_id=user.id,
-            table_id=att.table_id,
-            record_id=att.record_id,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details={"filename": att.original_filename, "action": "RESTORED_FROM_TRASH"},
-        )
+        try:
+            await audit_service.log_event(
+                db=db,
+                action=AuditAction.DOCUMENT_EDITED,
+                username=user.username,
+                user_id=user.id,
+                table_id=att.table_id,
+                record_id=att.record_id,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={"filename": att.original_filename, "action": "RESTORED_FROM_TRASH"},
+            )
+            await db.commit()
+        except Exception as audit_err:
+            logger.warning(f"Audit log notice for DOCUMENT_EDITED restore: {audit_err}")
+            await db.commit()
 
-        await db.commit()
         await db.refresh(att)
         return att
 
