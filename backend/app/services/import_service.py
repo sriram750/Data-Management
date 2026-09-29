@@ -178,13 +178,42 @@ class ImportService:
         ws = wb[selected_sheet]
 
         rows_iter = ws.iter_rows(values_only=True)
-        headers_raw = next(rows_iter, None)
+        # Skip leading empty rows to locate actual header row
+        headers_raw = None
+        for row in rows_iter:
+            if any(cell is not None and str(cell).strip() != "" for cell in row):
+                headers_raw = row
+                break
+
         if not headers_raw:
             wb.close()
-            raise ValidationException("The selected sheet appears to be empty.")
+            # Gracefully return 0-row empty preview instead of throwing a validation crash
+            return ExcelPreviewResponse(
+                file_token=file_token,
+                file_name=original_filename,
+                file_size_bytes=os.path.getsize(file_path),
+                sheets=sheets,
+                selected_sheet=selected_sheet,
+                total_rows=0,
+                total_columns=0,
+                detected_columns=[],
+                preview_rows=[],
+            )
 
-        # Clean headers
-        headers = [str(h).strip() if h is not None else f"Column_{i+1}" for i, h in enumerate(headers_raw)]
+        # Clean and deduplicate headers
+        headers: List[str] = []
+        seen_headers: Dict[str, int] = {}
+        for i, h in enumerate(headers_raw):
+            raw_title = str(h).strip() if h is not None else ""
+            if not raw_title:
+                raw_title = f"Column_{i+1}"
+            if raw_title in seen_headers:
+                seen_headers[raw_title] += 1
+                unique_title = f"{raw_title}_{seen_headers[raw_title]}"
+            else:
+                seen_headers[raw_title] = 1
+                unique_title = raw_title
+            headers.append(unique_title)
         
         column_samples: Dict[str, List[Any]] = {h: [] for h in headers}
         preview_rows: List[Dict[str, Any]] = []
@@ -629,7 +658,12 @@ class ImportService:
             try:
                 ws = wb[sheet_cfg.sheet_name]
                 rows_iter = ws.iter_rows(values_only=True)
-                headers_raw = next(rows_iter, None)
+                headers_raw = None
+                for row in rows_iter:
+                    if any(cell is not None and str(cell).strip() != "" for cell in row):
+                        headers_raw = row
+                        break
+
                 if not headers_raw:
                     failed_sheets.append(
                         BatchImportTableResult(
@@ -655,8 +689,21 @@ class ImportService:
                     candidate_slug = f"{base_slug}_{suffix_idx}"
                     suffix_idx += 1
 
-                # Clean headers and read rows
-                headers = [str(h).strip() if h is not None else f"Column_{i+1}" for i, h in enumerate(headers_raw)]
+                # Clean and deduplicate headers
+                headers: List[str] = []
+                seen_headers: Dict[str, int] = {}
+                for i, h in enumerate(headers_raw):
+                    raw_title = str(h).strip() if h is not None else ""
+                    if not raw_title:
+                        raw_title = f"Column_{i+1}"
+                    if raw_title in seen_headers:
+                        seen_headers[raw_title] += 1
+                        unique_title = f"{raw_title}_{seen_headers[raw_title]}"
+                    else:
+                        seen_headers[raw_title] = 1
+                        unique_title = raw_title
+                    headers.append(unique_title)
+
                 rows_data: List[List[Any]] = []
                 col_samples: Dict[str, List[Any]] = {h: [] for h in headers}
 

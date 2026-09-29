@@ -21,17 +21,25 @@ router = APIRouter(prefix="/imports", tags=["Import Engine"])
 
 @router.post("/upload", response_model=ExcelPreviewResponse)
 async def upload_excel_for_preview(
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    file_token: Optional[str] = Form(None),
     sheet_name: Optional[str] = Form(None),
     current_user: User = Depends(require_permission("import:execute")),
 ):
-    """Step 1: Upload Excel (.xlsx) file, detect sheets, extract headers, and generate data preview."""
+    """Step 1: Upload Excel (.xlsx) file or switch sheet using file_token, detect sheets, extract headers, and generate data preview."""
+    if file_token:
+        # Re-use already uploaded workbook on the server for instant sheet switching
+        return import_service.parse_and_preview(file_token, "workbook.xlsx", sheet_name=sheet_name)
+
+    if not file:
+        raise HTTPException(status_code=400, detail="Either file or file_token must be provided.")
+
     if not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(status_code=400, detail="Only .xlsx Excel files are supported.")
 
     file_bytes = await file.read()
-    file_token = import_service.save_temp_file(file_bytes, file.filename)
-    preview = import_service.parse_and_preview(file_token, file.filename, sheet_name=sheet_name)
+    saved_token = import_service.save_temp_file(file_bytes, file.filename)
+    preview = import_service.parse_and_preview(saved_token, file.filename, sheet_name=sheet_name)
     return preview
 
 

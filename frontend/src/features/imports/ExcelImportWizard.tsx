@@ -243,12 +243,19 @@ export const ExcelImportWizard: React.FC = () => {
   };
 
   const handleSheetChange = async (sheet: string) => {
-    if (!selectedFile) return;
     setSelectedSheet(sheet);
     setLoading(true);
+    setError(null);
     try {
       const formData = new FormData();
-      formData.append('file', selectedFile);
+      if (preview?.file_token) {
+        formData.append('file_token', preview.file_token);
+      } else if (selectedFile) {
+        formData.append('file', selectedFile);
+      } else {
+        setLoading(false);
+        return;
+      }
       formData.append('sheet_name', sheet);
 
       const res = await apiClient.post<ExcelPreviewResponse>('/imports/upload', formData, {
@@ -262,7 +269,7 @@ export const ExcelImportWizard: React.FC = () => {
         setNewTableName(sheet.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
       }
 
-      const configs: ColumnMappingConfig[] = res.data.detected_columns.map((c) => ({
+      const configs: ColumnMappingConfig[] = (res.data.detected_columns || []).map((c) => ({
         source_column: c.original_name,
         target_column: c.suggested_name,
         data_type: c.suggested_type,
@@ -272,7 +279,13 @@ export const ExcelImportWizard: React.FC = () => {
       }));
       setColumnConfigs(configs);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to switch sheet.');
+      const detail = err.response?.data?.detail;
+      const msg = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+        ? detail.map((d: any) => d.msg || JSON.stringify(d)).join(', ')
+        : err.message || 'Failed to switch sheet.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -1070,9 +1083,16 @@ export const ExcelImportWizard: React.FC = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {columnConfigs.map((cfg, idx) => (
-                      <TableRow key={cfg.source_column}>
-                        <TableCell sx={{ fontWeight: 600 }}>{cfg.source_column}</TableCell>
+                    {columnConfigs.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                          This sheet is empty or contains no detectable column headers.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      columnConfigs.map((cfg, idx) => (
+                        <TableRow key={`${cfg.source_column}_${idx}`}>
+                          <TableCell sx={{ fontWeight: 600 }}>{cfg.source_column}</TableCell>
                         <TableCell>
                           <TextField
                             size="small"
@@ -1139,7 +1159,7 @@ export const ExcelImportWizard: React.FC = () => {
                           />
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )))}
                   </TableBody>
                 </Table>
               </TableContainer>
