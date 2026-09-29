@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
+  Alert,
   Box,
   Button,
   ButtonGroup,
@@ -16,6 +17,7 @@ import {
 } from '@mui/material';
 import {
   Code,
+  Download,
   FormatAlignCenter,
   FormatAlignJustify,
   FormatAlignLeft,
@@ -67,6 +69,87 @@ import {
 } from 'docx';
 import { apiClient } from '../../api/client';
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function extractDocText(buffer: ArrayBuffer): string[] {
+  const bytes = new Uint8Array(buffer);
+  const metadataWords = new Set([
+    'worddocument',
+    'root entry',
+    'compobj',
+    'summaryinformation',
+    'documentsummaryinformation',
+    'data',
+    'table',
+    '1table',
+    '0table',
+    'microsoft word',
+    'normal.dotm',
+    'normal.dot',
+  ]);
+
+  // 1. Try UTF-16LE scanning
+  const utf16Chunks: string[] = [];
+  let cur16 = '';
+  for (let i = 0; i < bytes.length - 1; i += 2) {
+    const code = bytes[i] | (bytes[i + 1] << 8);
+    if (
+      (code >= 32 && code <= 126) ||
+      code === 10 ||
+      code === 13 ||
+      code === 9 ||
+      (code >= 160 && code <= 65533)
+    ) {
+      cur16 += String.fromCharCode(code);
+    } else {
+      if (cur16.trim().length >= 3) {
+        const trimmed = cur16.trim();
+        if (!metadataWords.has(trimmed.toLowerCase())) {
+          utf16Chunks.push(trimmed);
+        }
+      }
+      cur16 = '';
+    }
+  }
+  if (cur16.trim().length >= 3) {
+    const trimmed = cur16.trim();
+    if (!metadataWords.has(trimmed.toLowerCase())) utf16Chunks.push(trimmed);
+  }
+
+  // 2. Try ASCII / 8-bit scanning
+  const asciiChunks: string[] = [];
+  let cur8 = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
+      cur8 += String.fromCharCode(b);
+    } else {
+      if (cur8.trim().length >= 3) {
+        const trimmed = cur8.trim();
+        if (!metadataWords.has(trimmed.toLowerCase())) {
+          asciiChunks.push(trimmed);
+        }
+      }
+      cur8 = '';
+    }
+  }
+  if (cur8.trim().length >= 3) {
+    const trimmed = cur8.trim();
+    if (!metadataWords.has(trimmed.toLowerCase())) asciiChunks.push(trimmed);
+  }
+
+  const total16 = utf16Chunks.join(' ').length;
+  const total8 = asciiChunks.join(' ').length;
+  return total16 >= total8 ? utf16Chunks : asciiChunks;
+}
+
 interface WordStudioProps {
   fileUrl: string;
   isEditing: boolean;
@@ -79,6 +162,8 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
   const [error, setError] = useState<string | null>(null);
   const [rawBuffer, setRawBuffer] = useState<ArrayBuffer | null>(null);
   const [ribbonTab, setRibbonTab] = useState<number>(0);
+  const [isLegacyDoc, setIsLegacyDoc] = useState<boolean>(false);
+  const [legacyHtml, setLegacyHtml] = useState<string>('');
 
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const [previewContainerEl, setPreviewContainerEl] = useState<HTMLDivElement | null>(null);
@@ -134,10 +219,25 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
         if (isCancelled) return;
         setRawBuffer(buffer.slice(0));
 
-        // Parse HTML via mammoth for Tiptap editor
-        const mammothResult = await mammoth.convertToHtml({ arrayBuffer: buffer.slice(0) });
-        if (editor && !isCancelled && mammothResult.value) {
-          editor.commands.setContent(mammothResult.value);
+        // Parse HTML via mammoth for Tiptap editor or fallback for legacy .doc
+        try {
+          const mammothResult = await mammoth.convertToHtml({ arrayBuffer: buffer.slice(0) });
+          if (editor && !isCancelled && mammothResult.value) {
+            editor.commands.setContent(mammothResult.value);
+          }
+        } catch (mammothErr: any) {
+          console.warn('Mammoth parse failed, trying legacy document text extraction:', mammothErr);
+          const paragraphs = extractDocText(buffer.slice(0));
+          if (paragraphs.length > 0) {
+            const html = paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('');
+            setIsLegacyDoc(true);
+            setLegacyHtml(html);
+            if (editor && !isCancelled) {
+              editor.commands.setContent(html);
+            }
+          } else {
+            throw mammothErr;
+          }
         }
       } catch (err: any) {
         if (!isCancelled) {
@@ -159,20 +259,35 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
     let isCancelled = false;
     if (!isEditing && rawBuffer && previewContainerEl) {
       previewContainerEl.innerHTML = '';
+      if (isLegacyDoc && legacyHtml) {
+        previewContainerEl.innerHTML = legacyHtml;
+        return;
+      }
       renderAsync(rawBuffer, previewContainerEl, undefined, {
         inWrapper: true,
         breakPages: true,
         ignoreWidth: false,
       }).catch((err) => {
         if (!isCancelled) {
-          console.error('Word preview render error:', err);
+          console.warn('Word preview render error, trying legacy fallback:', err);
+          if (legacyHtml) {
+            previewContainerEl.innerHTML = legacyHtml;
+          } else {
+            const paragraphs = extractDocText(rawBuffer.slice(0));
+            if (paragraphs.length > 0) {
+              const html = paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('');
+              setIsLegacyDoc(true);
+              setLegacyHtml(html);
+              previewContainerEl.innerHTML = html;
+            }
+          }
         }
       });
     }
     return () => {
       isCancelled = true;
     };
-  }, [isEditing, rawBuffer, previewContainerEl]);
+  }, [isEditing, rawBuffer, previewContainerEl, isLegacyDoc, legacyHtml]);
 
   // Save changes by serializing editor content to valid .docx binary with high-fidelity formatting
   const handleSaveDocx = async () => {
@@ -814,25 +929,77 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
         {error && (
           <Box sx={{ textAlign: 'center', mt: 10, color: '#F87171' }}>
             <Typography variant="h6">Failed to load Word document</Typography>
-            <Typography variant="body2">{error}</Typography>
+            <Typography variant="body2" sx={{ mb: 2.5, color: '#FCA5A5', maxWidth: 600, mx: 'auto' }}>
+              {error}
+            </Typography>
+            <Button
+              component="a"
+              href={fileUrl}
+              download
+              variant="contained"
+              color="primary"
+              startIcon={<Download />}
+              sx={{ textTransform: 'none', fontWeight: 600 }}
+            >
+              Download Original Word File
+            </Button>
           </Box>
         )}
 
         {!loading && !error && (
-          <Paper
-            elevation={6}
-            sx={{
-              width: '100%',
-              maxWidth: 860,
-              minHeight: '1050px',
-              bgcolor: '#FFFFFF',
-              color: '#1E293B',
-              p: 5,
-              borderRadius: 1,
-              boxShadow: '0 20px 40px -15px rgba(0,0,0,0.7)',
-              fontFamily: "'Calibri', 'Segoe UI', Arial, sans-serif",
-            }}
-          >
+          <Box sx={{ width: '100%', maxWidth: 860, display: 'flex', flexDirection: 'column' }}>
+            {isLegacyDoc && (
+              <Alert
+                severity="info"
+                sx={{
+                  mb: 2.5,
+                  bgcolor: 'rgba(37, 99, 235, 0.15)',
+                  border: '1px solid rgba(59, 130, 246, 0.35)',
+                  color: '#93C5FD',
+                  borderRadius: 2,
+                  '& .MuiAlert-icon': { color: '#60A5FA' },
+                }}
+                action={
+                  <Button
+                    component="a"
+                    href={fileUrl}
+                    download
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      color: '#93C5FD',
+                      borderColor: 'rgba(59, 130, 246, 0.5)',
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      '&:hover': {
+                        borderColor: '#60A5FA',
+                        bgcolor: 'rgba(59, 130, 246, 0.15)',
+                      },
+                    }}
+                    startIcon={<Download />}
+                  >
+                    Download Original (.doc)
+                  </Button>
+                }
+              >
+                <strong>Legacy Word 97-2003 Document (.doc):</strong> Text content has been extracted for reading and editing. You can edit and save to convert to modern .docx format, or download the original file.
+              </Alert>
+            )}
+
+            <Paper
+              elevation={6}
+              sx={{
+                width: '100%',
+                minHeight: '1050px',
+                bgcolor: '#FFFFFF',
+                color: '#1E293B',
+                p: 5,
+                borderRadius: 1,
+                boxShadow: '0 20px 40px -15px rgba(0,0,0,0.7)',
+                fontFamily: "'Calibri', 'Segoe UI', Arial, sans-serif",
+                lineHeight: 1.6,
+              }}
+            >
             {/* If in Reading Mode: docx-preview rendered container */}
             <Box
               ref={previewContainerCallbackRef}
@@ -900,7 +1067,8 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
               </Box>
             )}
           </Paper>
-        )}
+        </Box>
+      )}
       </Box>
     </Box>
   );

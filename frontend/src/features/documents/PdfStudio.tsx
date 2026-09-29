@@ -27,6 +27,7 @@ import {
   Clear,
   Create,
   DeleteForever,
+  Download,
   EditOutlined,
   FormatColorFill,
   Highlight,
@@ -44,7 +45,44 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { PDFDocument, rgb, degrees } from 'pdf-lib';
 import { apiClient } from '../../api/client';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// Blob URL loader to ensure proper application/javascript MIME type across all web servers
+let cachedWorkerBlobUrl: string | null = null;
+let isInitializingWorker = false;
+
+async function ensurePdfWorkerReady(): Promise<string> {
+  if (cachedWorkerBlobUrl) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = cachedWorkerBlobUrl;
+    return cachedWorkerBlobUrl;
+  }
+  if (isInitializingWorker) {
+    // Wait for in-flight initialization
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    if (cachedWorkerBlobUrl) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = cachedWorkerBlobUrl;
+      return cachedWorkerBlobUrl;
+    }
+  }
+  isInitializingWorker = true;
+  try {
+    const res = await fetch(pdfjsWorker);
+    if (res.ok) {
+      const code = await res.text();
+      const blob = new Blob([code], { type: 'application/javascript' });
+      cachedWorkerBlobUrl = URL.createObjectURL(blob);
+      pdfjsLib.GlobalWorkerOptions.workerSrc = cachedWorkerBlobUrl;
+      return cachedWorkerBlobUrl;
+    }
+  } catch (err) {
+    console.warn('Could not create Blob URL for PDF worker, falling back to direct URL:', err);
+  } finally {
+    isInitializingWorker = false;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+  return pdfjsWorker;
+}
+
+// Initial worker setup
+ensurePdfWorkerReady().catch(() => {});
 
 interface Annotation {
   id: string;
@@ -120,6 +158,7 @@ export const PdfStudio: React.FC<PdfStudioProps> = ({ fileUrl, isEditing, onSave
         if (isCancelled) return;
         setRawArrayBuffer(buffer.slice(0));
 
+        await ensurePdfWorkerReady();
         const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
         const doc = await loadingTask.promise;
         if (isCancelled) return;
@@ -630,7 +669,20 @@ export const PdfStudio: React.FC<PdfStudioProps> = ({ fileUrl, isEditing, onSave
         {error && (
           <Box sx={{ textAlign: 'center', mt: 10, color: '#F87171' }}>
             <Typography variant="h6">Failed to load PDF</Typography>
-            <Typography variant="body2">{error}</Typography>
+            <Typography variant="body2" sx={{ mb: 2.5, color: '#FCA5A5', maxWidth: 600, mx: 'auto' }}>
+              {error}
+            </Typography>
+            <Button
+              component="a"
+              href={fileUrl}
+              download
+              variant="contained"
+              color="primary"
+              startIcon={<Download />}
+              sx={{ textTransform: 'none', fontWeight: 600 }}
+            >
+              Download PDF File
+            </Button>
           </Box>
         )}
 
