@@ -112,7 +112,13 @@ export const DocumentStudioModal: React.FC<DocumentStudioModalProps> = ({
         ? 'application/pdf'
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-      const file = new File([newBytes as any], doc?.original_filename || `document.${ext}`, {
+      const baseFilename = doc?.original_filename || `document.${ext}`;
+      const saveFilename =
+        !isPdf && baseFilename.toLowerCase().endsWith('.doc')
+          ? baseFilename.replace(/\.doc$/i, '.docx')
+          : baseFilename;
+
+      const file = new File([newBytes as any], saveFilename, {
         type: mime,
       });
       formData.append('file', file);

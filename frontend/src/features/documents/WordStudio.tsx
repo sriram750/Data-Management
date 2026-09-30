@@ -78,8 +78,302 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+function cleanExtractedText(text: string): string[] {
+  // Word uses 0x0D (13) for paragraph breaks, 0x07 for cell markers, 0x0B for soft breaks
+  const cleaned = text
+    .replace(/[\x00-\x08\x0E-\x1F\x7F]/g, ' ') // Strip non-printable control chars, keep \t (9), \n (10), \r (13)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\x07/g, '  |  ') // cell break
+    .replace(/\x0B/g, '\n');
+
+  return cleaned
+    .split('\n')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+function parseOleDoc(buffer: ArrayBuffer): string[] | null {
+  try {
+    const view = new DataView(buffer);
+    // Verify OLE Header magic: 0xD0CF11E0 0xA1B11AE1
+    if (view.byteLength < 512) return null;
+    if (view.getUint32(0, false) !== 0xD0CF11E0 || view.getUint32(4, false) !== 0xA1B11AE1) {
+      return null;
+    }
+
+    const sectorShift = view.getUint16(30, true);
+    const miniSectorShift = view.getUint16(32, true);
+    const sectorSize = 1 << sectorShift;
+    const miniSectorSize = 1 << miniSectorShift;
+    const numFatSectors = view.getUint32(44, true);
+    const firstDirSector = view.getUint32(48, true);
+    const miniCutoff = view.getUint32(56, true) || 4096;
+    const firstMiniFatSector = view.getUint32(60, true);
+    const numMiniFatSectors = view.getUint32(64, true);
+    const firstDifatSector = view.getUint32(68, true);
+
+    // Build DIFAT sector indices
+    const fatSectorIndices: number[] = [];
+    const initialDifatCount = Math.min(109, numFatSectors);
+    for (let i = 0; i < initialDifatCount; i++) {
+      const sec = view.getUint32(76 + i * 4, true);
+      if (sec < 0xFFFFFFFC) fatSectorIndices.push(sec);
+    }
+    let curDifatSec = firstDifatSector;
+    while (curDifatSec < 0xFFFFFFFC && fatSectorIndices.length < numFatSectors) {
+      const offset = (curDifatSec + 1) * sectorSize;
+      for (let j = 0; j < (sectorSize / 4) - 1; j++) {
+        const sec = view.getUint32(offset + j * 4, true);
+        if (sec < 0xFFFFFFFC) fatSectorIndices.push(sec);
+      }
+      curDifatSec = view.getUint32(offset + sectorSize - 4, true);
+    }
+
+    // Build FAT table
+    const fat: number[] = [];
+    for (const fatSec of fatSectorIndices) {
+      const offset = (fatSec + 1) * sectorSize;
+      if (offset + sectorSize <= view.byteLength) {
+        for (let j = 0; j < sectorSize / 4; j++) {
+          fat.push(view.getUint32(offset + j * 4, true));
+        }
+      }
+    }
+
+    // Helper: read regular sector chain
+    function readChain(startSec: number, totalSize: number): Uint8Array {
+      let sec = startSec;
+      const chunks: Uint8Array[] = [];
+      let remain = totalSize;
+      let iterations = 0;
+      while (sec < 0xFFFFFFFC && remain > 0 && iterations < 100000) {
+        const offset = (sec + 1) * sectorSize;
+        const readLen = Math.min(sectorSize, remain);
+        if (offset + readLen <= buffer.byteLength) {
+          chunks.push(new Uint8Array(buffer, offset, readLen));
+          remain -= readLen;
+        } else {
+          break;
+        }
+        sec = fat[sec] ?? 0xFFFFFFFE;
+        iterations++;
+      }
+      const actualLen = chunks.reduce((acc, c) => acc + c.length, 0);
+      const out = new Uint8Array(actualLen);
+      let pos = 0;
+      for (const ch of chunks) {
+        out.set(ch, pos);
+        pos += ch.length;
+      }
+      return out;
+    }
+
+    // Read Directory entries
+    const dirBytes = readChain(firstDirSector, 1024 * 1024);
+    const dirView = new DataView(dirBytes.buffer, dirBytes.byteOffset, dirBytes.byteLength);
+    interface DirEntry {
+      name: string;
+      type: number;
+      startSec: number;
+      size: number;
+    }
+    const entries: DirEntry[] = [];
+    for (let i = 0; i < dirBytes.byteLength; i += 128) {
+      const nameLen = dirView.getUint16(i + 64, true);
+      if (nameLen === 0) continue;
+      let name = '';
+      for (let c = 0; c < Math.min(nameLen - 2, 64); c += 2) {
+        name += String.fromCharCode(dirView.getUint16(i + c, true));
+      }
+      const type = dirView.getUint8(i + 66);
+      const startSec = dirView.getUint32(i + 116, true);
+      const size = dirView.getUint32(i + 120, true);
+      entries.push({ name, type, startSec, size });
+    }
+
+    const rootEntry = entries.find((e) => e.type === 5 || e.name.toLowerCase() === 'root entry');
+    const miniStream = rootEntry && rootEntry.startSec < 0xFFFFFFFC
+      ? readChain(rootEntry.startSec, rootEntry.size)
+      : new Uint8Array(0);
+
+    // Build MiniFAT table
+    const miniFat: number[] = [];
+    if (firstMiniFatSector < 0xFFFFFFFC && numMiniFatSectors > 0) {
+      let msec = firstMiniFatSector;
+      let mcount = 0;
+      while (msec < 0xFFFFFFFC && mcount < numMiniFatSectors) {
+        const offset = (msec + 1) * sectorSize;
+        if (offset + sectorSize <= view.byteLength) {
+          for (let j = 0; j < sectorSize / 4; j++) {
+            miniFat.push(view.getUint32(offset + j * 4, true));
+          }
+        }
+        msec = fat[msec] ?? 0xFFFFFFFE;
+        mcount++;
+      }
+    }
+
+    function getStream(entry?: DirEntry): Uint8Array | null {
+      if (!entry) return null;
+      if (entry.size < miniCutoff && miniStream.byteLength > 0 && entry.type !== 5) {
+        let msec = entry.startSec;
+        const chunks: Uint8Array[] = [];
+        let remain = entry.size;
+        let it = 0;
+        while (msec < 0xFFFFFFFC && remain > 0 && it < 50000) {
+          const offset = msec * miniSectorSize;
+          const readLen = Math.min(miniSectorSize, remain);
+          if (offset + readLen <= miniStream.byteLength) {
+            chunks.push(miniStream.slice(offset, offset + readLen));
+          }
+          remain -= readLen;
+          msec = miniFat[msec] ?? 0xFFFFFFFE;
+          it++;
+        }
+        const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+        const out = new Uint8Array(totalLen);
+        let p = 0;
+        for (const ch of chunks) {
+          out.set(ch, p);
+          p += ch.length;
+        }
+        return out;
+      }
+      return readChain(entry.startSec, entry.size);
+    }
+
+    const wdEntry = entries.find((e) => e.name.toLowerCase() === 'worddocument');
+    if (!wdEntry) return null;
+    const wdBytes = getStream(wdEntry);
+    if (!wdBytes || wdBytes.length < 512) return null;
+    const wdView = new DataView(wdBytes.buffer, wdBytes.byteOffset, wdBytes.byteLength);
+
+    const flags = wdView.getUint16(10, true);
+    const fWhichTblStm = (flags & 0x0200) !== 0;
+    const tblName = fWhichTblStm ? '1table' : '0table';
+    const tblEntry = entries.find((e) => e.name.toLowerCase() === tblName);
+
+    if (tblEntry) {
+      const tblBytes = getStream(tblEntry);
+      if (tblBytes && tblBytes.length > 0) {
+        const fcClx = wdView.getUint32(418, true);
+        const lcbClx = wdView.getUint32(422, true);
+
+        if (lcbClx > 0 && fcClx + lcbClx <= tblBytes.length) {
+          let clxPos = fcClx;
+          const clxEnd = fcClx + lcbClx;
+          const tblView = new DataView(tblBytes.buffer, tblBytes.byteOffset, tblBytes.byteLength);
+
+          while (clxPos < clxEnd) {
+            const clxt = tblView.getUint8(clxPos);
+            clxPos++;
+            if (clxt === 1) { // Prc
+              const cbGrpprl = tblView.getUint16(clxPos, true);
+              clxPos += 2 + cbGrpprl;
+            } else if (clxt === 2) { // PlcPcd (Piece Table)
+              const lcb = tblView.getUint32(clxPos, true);
+              clxPos += 4;
+              const numPieces = Math.floor((lcb - 4) / 12);
+              if (numPieces > 0) {
+                const cpArr: number[] = [];
+                for (let p = 0; p <= numPieces; p++) {
+                  cpArr.push(tblView.getUint32(clxPos + p * 4, true));
+                }
+                const pcdPos = clxPos + (numPieces + 1) * 4;
+
+                let fullText = '';
+                for (let p = 0; p < numPieces; p++) {
+                  const fc = tblView.getUint32(pcdPos + p * 8 + 2, true);
+                  const fCompressed = (fc & 0x40000000) !== 0;
+                  const actualFc = fc & 0x3FFFFFFF;
+                  const charCount = cpArr[p + 1] - cpArr[p];
+
+                  if (fCompressed) {
+                    const byteOffset = Math.floor(actualFc / 2);
+                    for (let c = 0; c < charCount; c++) {
+                      if (byteOffset + c < wdBytes.length) {
+                        fullText += String.fromCharCode(wdBytes[byteOffset + c]);
+                      }
+                    }
+                  } else {
+                    const byteOffset = actualFc;
+                    for (let c = 0; c < charCount; c++) {
+                      if (byteOffset + c * 2 + 1 < wdBytes.length) {
+                        fullText += String.fromCharCode(wdView.getUint16(byteOffset + c * 2, true));
+                      }
+                    }
+                  }
+                }
+
+                if (fullText.trim().length > 0) {
+                  return cleanExtractedText(fullText);
+                }
+              }
+              break;
+            } else {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Fallback: If piece table was absent, read non-complex text starting from fcMin
+    const fcMin = wdView.getUint32(24, true);
+    const ccpText = wdView.getUint32(76, true);
+    if (fcMin > 0 && ccpText > 0 && fcMin < wdBytes.length) {
+      let rawText = '';
+      const readLen = Math.min(ccpText, wdBytes.length - fcMin);
+      for (let i = 0; i < readLen; i++) {
+        const b = wdBytes[fcMin + i];
+        if (b >= 32 || b === 10 || b === 13 || b === 9) {
+          rawText += String.fromCharCode(b);
+        }
+      }
+      if (rawText.trim().length > 0) {
+        return cleanExtractedText(rawText);
+      }
+    }
+  } catch (err) {
+    console.warn('OLE2 Compound Document parsing notice:', err);
+  }
+  return null;
+}
+
 function extractDocText(buffer: ArrayBuffer): string[] {
   const bytes = new Uint8Array(buffer);
+
+  // 1. Check for RTF file renamed to .doc
+  if (bytes.length >= 5) {
+    const rtfHeader = String.fromCharCode(...bytes.slice(0, 5));
+    if (rtfHeader === '{\\rtf') {
+      const rtfStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      const textOnly = rtfStr
+        .replace(/\\\w+(?:-?\d+)? ?/g, '')
+        .replace(/[{}]/g, '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (textOnly.length > 0) return textOnly;
+    }
+  }
+
+  // 2. Check for HTML file renamed to .doc
+  const startStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(0, 100)).toLowerCase();
+  if (startStr.includes('<html') || startStr.includes('<!doctype html') || startStr.includes('<xml')) {
+    const htmlStr = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    const cleanText = htmlStr.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanText) return [cleanText];
+  }
+
+  // 3. Try standard Microsoft Word 97-2003 OLE2 / FIB / Piece Table extraction
+  const oleResult = parseOleDoc(buffer);
+  if (oleResult && oleResult.length > 0) {
+    return oleResult;
+  }
+
+  // 4. Fallback: Clean ASCII / 8-bit text scanning (never arbitrary 16-bit pairings that cause Chinese glyphs)
   const metadataWords = new Set([
     'worddocument',
     'root entry',
@@ -95,59 +389,28 @@ function extractDocText(buffer: ArrayBuffer): string[] {
     'normal.dot',
   ]);
 
-  // 1. Try UTF-16LE scanning
-  const utf16Chunks: string[] = [];
-  let cur16 = '';
-  for (let i = 0; i < bytes.length - 1; i += 2) {
-    const code = bytes[i] | (bytes[i + 1] << 8);
-    if (
-      (code >= 32 && code <= 126) ||
-      code === 10 ||
-      code === 13 ||
-      code === 9 ||
-      (code >= 160 && code <= 65533)
-    ) {
-      cur16 += String.fromCharCode(code);
-    } else {
-      if (cur16.trim().length >= 3) {
-        const trimmed = cur16.trim();
-        if (!metadataWords.has(trimmed.toLowerCase())) {
-          utf16Chunks.push(trimmed);
-        }
-      }
-      cur16 = '';
-    }
-  }
-  if (cur16.trim().length >= 3) {
-    const trimmed = cur16.trim();
-    if (!metadataWords.has(trimmed.toLowerCase())) utf16Chunks.push(trimmed);
-  }
-
-  // 2. Try ASCII / 8-bit scanning
   const asciiChunks: string[] = [];
-  let cur8 = '';
+  let cur = '';
   for (let i = 0; i < bytes.length; i++) {
     const b = bytes[i];
-    if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
-      cur8 += String.fromCharCode(b);
+    if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9 || (b >= 160 && b <= 255)) {
+      cur += String.fromCharCode(b);
     } else {
-      if (cur8.trim().length >= 3) {
-        const trimmed = cur8.trim();
+      if (cur.trim().length >= 3) {
+        const trimmed = cur.trim();
         if (!metadataWords.has(trimmed.toLowerCase())) {
           asciiChunks.push(trimmed);
         }
       }
-      cur8 = '';
+      cur = '';
     }
   }
-  if (cur8.trim().length >= 3) {
-    const trimmed = cur8.trim();
+  if (cur.trim().length >= 3) {
+    const trimmed = cur.trim();
     if (!metadataWords.has(trimmed.toLowerCase())) asciiChunks.push(trimmed);
   }
 
-  const total16 = utf16Chunks.join(' ').length;
-  const total8 = asciiChunks.join(' ').length;
-  return total16 >= total8 ? utf16Chunks : asciiChunks;
+  return asciiChunks;
 }
 
 interface WordStudioProps {
@@ -219,7 +482,32 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
         if (isCancelled) return;
         setRawBuffer(buffer.slice(0));
 
-        // Parse HTML via mammoth for Tiptap editor or fallback for legacy .doc
+        const bytes = new Uint8Array(buffer);
+        const isOleDoc =
+          bytes.length >= 8 &&
+          bytes[0] === 0xd0 &&
+          bytes[1] === 0xcf &&
+          bytes[2] === 0x11 &&
+          bytes[3] === 0xe0 &&
+          bytes[4] === 0xa1 &&
+          bytes[5] === 0xb1 &&
+          bytes[6] === 0x1a &&
+          bytes[7] === 0xe1;
+
+        if (isOleDoc) {
+          const paragraphs = extractDocText(buffer.slice(0));
+          if (paragraphs.length > 0) {
+            const html = paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('');
+            setIsLegacyDoc(true);
+            setLegacyHtml(html);
+            if (editor && !isCancelled) {
+              editor.commands.setContent(html);
+            }
+            return;
+          }
+        }
+
+        // Parse HTML via mammoth for modern .docx or fallback for legacy .doc
         try {
           const mammothResult = await mammoth.convertToHtml({ arrayBuffer: buffer.slice(0) });
           if (editor && !isCancelled && mammothResult.value) {
@@ -1013,6 +1301,12 @@ export const WordStudio: React.FC<WordStudioProps> = ({ fileUrl, isEditing, onSa
                   boxShadow: 'none !important',
                   p: '0 !important',
                   minHeight: 'auto !important',
+                  color: '#1E293B',
+                },
+                '& p': {
+                  margin: '0 0 1.25em 0',
+                  fontSize: '1.05rem',
+                  lineHeight: 1.7,
                   color: '#1E293B',
                 },
               }}
