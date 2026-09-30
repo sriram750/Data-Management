@@ -103,7 +103,11 @@ class DocumentConverterService:
                 res = subprocess.run(
                     [
                         soffice_bin,
+                        "-env:UserInstallation=file:///tmp/libreoffice_profile",
                         "--headless",
+                        "--invisible",
+                        "--nodefault",
+                        "--nofirststartwizard",
                         "--convert-to",
                         "docx",
                         "--outdir",
@@ -112,15 +116,23 @@ class DocumentConverterService:
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=45,
+                    timeout=60,
                 )
                 base_in = os.path.splitext(os.path.basename(abs_in))[0]
                 default_soffice_out = os.path.join(out_dir, f"{base_in}.docx")
                 if os.path.exists(default_soffice_out):
-                    if default_soffice_out != abs_out:
+                    if os.path.abspath(default_soffice_out) != abs_out:
                         shutil.move(default_soffice_out, abs_out)
                     logger.info(f"Successfully converted '{abs_in}' to DOCX via LibreOffice.")
                     return True
+                # If output has slightly different casing or extension
+                for f in os.listdir(out_dir):
+                    if f.startswith(base_in) and f.lower().endswith(".docx"):
+                        found_path = os.path.join(out_dir, f)
+                        if os.path.abspath(found_path) != abs_out:
+                            shutil.move(found_path, abs_out)
+                        logger.info(f"Successfully converted '{abs_in}' to DOCX via LibreOffice.")
+                        return True
             except Exception as e:
                 logger.warning(f"LibreOffice conversion failed for '{abs_in}': {e}")
 

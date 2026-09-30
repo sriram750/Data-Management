@@ -26,17 +26,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libreoffice-writer-nogui \
     libreoffice-common \
+    fonts-dejavu-core \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH=/app
+ENV HOME=/home/appuser
 
-# Create unprivileged user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser \
-    && mkdir -p /app/storage/attachments \
-    && chown -R appuser:appuser /app
+# Create unprivileged user for security and set up LibreOffice profile
+RUN groupadd -r appuser && useradd -r -m -d /home/appuser -g appuser appuser \
+    && mkdir -p /app/storage/attachments /tmp/libreoffice_profile \
+    && chown -R appuser:appuser /app /home/appuser /tmp/libreoffice_profile
 
 COPY . /app
 RUN chown -R appuser:appuser /app
