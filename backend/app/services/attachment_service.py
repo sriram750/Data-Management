@@ -15,6 +15,7 @@ from app.models.audit_log import AuditAction, AuditLog
 from app.models.file_attachment import AttachmentVersion, FileAttachment
 from app.models.user import User
 from app.services.audit_service import audit_service
+from app.services.document_converter import DocumentConverterService
 
 
 class AttachmentService:
@@ -246,7 +247,21 @@ class AttachmentService:
             except Exception:
                 pass
 
-        return file_path, content_type, original_filename
+        preview_path = file_path
+        preview_content_type = content_type
+        preview_filename = original_filename
+
+        if DocumentConverterService.is_doc_file(original_filename, content_type):
+            docx_path = await DocumentConverterService.get_or_create_docx_preview(file_path)
+            if docx_path and os.path.exists(docx_path):
+                preview_path = docx_path
+                preview_content_type = (
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                if preview_filename.lower().endswith(".doc"):
+                    preview_filename = preview_filename[:-4] + ".docx"
+
+        return preview_path, preview_content_type, preview_filename
 
     @staticmethod
     async def save_edited_document(
@@ -539,12 +554,22 @@ class AttachmentService:
                 os.remove(main_path)
             except Exception:
                 pass
+        if os.path.exists(f"{main_path}.preview.docx"):
+            try:
+                os.remove(f"{main_path}.preview.docx")
+            except Exception:
+                pass
 
         for v in att.versions:
             v_path = os.path.join(upload_dir, v.stored_filename)
             if os.path.exists(v_path) and v_path != main_path:
                 try:
                     os.remove(v_path)
+                except Exception:
+                    pass
+            if os.path.exists(f"{v_path}.preview.docx"):
+                try:
+                    os.remove(f"{v_path}.preview.docx")
                 except Exception:
                     pass
 
